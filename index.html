@@ -148,6 +148,12 @@ header .tag{min-height:36px;padding:0 12px!important;display:inline-flex;align-i
 .tsub{font-size:.76rem;color:var(--mute)}
 .pri,.stt{display:inline-block;padding:2px 11px;border-radius:99px;font-size:.78rem;font-weight:700;white-space:nowrap;border:1.5px solid var(--c);color:var(--ink)}
 @media (max-width:760px){.hm{display:none}.tbl th,.tbl td{padding:10px 8px}.tbl{font-size:.88rem}}
+.fchips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.fchips button{min-height:44px;border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:0 14px;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.fchips button[aria-pressed="true"]{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+.fchips .cnt{background:rgba(127,127,127,.22);color:inherit}
+.stt.reg{--c:#7a4fd6}
+label[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -168,9 +174,15 @@ header .tag{min-height:36px;padding:0 12px!important;display:inline-flex;align-i
 <div class="ov" id="addBox" hidden role="dialog" aria-modal="true" aria-label="Add a task"><div class="sheet"><h2>New task</h2>
 <form id="f">
 <label class="full">Task name<input id="name" required maxlength="80" placeholder="e.g. Organic chemistry – chapter 4"></label>
-<label>Deadline<input id="dl" type="date"></label>
+<label>Type<select id="ty"><option value="task">One-time task (board)</option><option value="daily">Daily regular task (every day until end date)</option><option value="weekly">Weekly habit</option></select></label>
 <label>Starting priority<select id="pr"><option value="0">High</option><option value="1" selected>Medium</option><option value="2">Low</option></select></label>
-<label>Type<select id="ty"><option value="task">One-time task (board)</option><option value="daily">Daily habit (asked every day)</option><option value="weekly">Weekly habit</option></select></label><label>Times per week<input id="tg" type="number" min="1" max="7" value="3"></label>
+<label><span id="dlT">Deadline</span><input id="dl" type="date"></label>
+<label id="odL">Do it on (optional)<input id="od" type="date"></label>
+<label id="tgL" hidden>Times per week<input id="tg" type="number" min="1" max="7" value="3"></label>
+<label>Start time (optional)<input id="ts" type="time"></label>
+<label>End time (optional)<input id="te" type="time"></label>
+<label class="full">Alarm (rings at the start time, default alarm sound)<select id="al"></select></label>
+<button class="btn alt full" type="button" id="tstA">Test alarm sound</button>
 <button class="btn full" type="submit">Add task</button>
 <button class="btn alt full" type="button" id="addX">Cancel</button>
 </form></div></div>
@@ -195,6 +207,7 @@ header .tag{min-height:36px;padding:0 12px!important;display:inline-flex;align-i
 <div class="ov" id="ck" hidden role="dialog" aria-modal="true" aria-label="Daily check-in"><div class="sheet" id="ckb"></div></div>
 <div class="ov" id="cm" hidden role="dialog" aria-modal="true" aria-label="Comments"><div class="sheet" id="cmb"></div></div>
 <div class="ov" id="as" hidden role="dialog" aria-modal="true" aria-label="Task actions"><div class="sheet" id="asb"></div></div>
+<div class="ov" id="alm" hidden role="alertdialog" aria-modal="true" aria-label="Task alarm" style="z-index:70"><div class="sheet" id="almb"></div></div>
 
 <!-- Firebase adapter: replaces the old window.claude cloud sync -->
 <script>
@@ -330,7 +343,7 @@ function streak(){var d=today(),n=0;if(!S.act[d])d=addDays(d,-1);while(S.act[d])
 function card(t){
  var L=lvl(t),i=COLS.map(function(c){return c[0]}).indexOf(t.st),rev="",rw=!ro(),cmb=live?'<button data-a="cm" data-id="'+t.id+'" aria-label="Comments">💬 '+cmCount(t.id)+"</button>":"";
  if(t.st==="done"){rev=t.nextRev?(diff(t.nextRev)<=0?'<span class="late">Revise today</span>':"<span>Revise in "+diff(t.nextRev)+"d</span>"):"<span>Mastered ✓</span>"}
- return '<div class="card l'+L.i+'" draggable="'+rw+'" data-id="'+t.id+'"><div class="name">'+esc(t.n)+'</div><div class="meta"><span class="tag">'+LV[L.i]+"</span>"+(L.up?'<span class="tag up">↑ from '+L.from+"</span>":"")+(t.st==="done"?rev:left(t.dl))+(t.by&&t.by!==ME&&NM[t.by]?"<span>by "+esc(NM[t.by])+"</span>":"")+'</div><div class="acts">'+(rw?'<button class="btn'+(t.st==="done"?" alt":"")+'" data-a="'+(t.st==="done"?"to":"go")+'"'+(t.st==="done"?' data-st="todo"':"")+' data-id="'+t.id+'">'+(t.st==="todo"?"Start":t.st==="doing"?"Mark done ✓":"Reopen")+'</button>':"")+cmb+(rw?'<button data-a="more" data-id="'+t.id+'" aria-label="More actions">⋯</button>':"")+'</div></div>';
+ return '<div class="card l'+L.i+'" draggable="'+rw+'" data-id="'+t.id+'"><div class="name">'+esc(t.n)+'</div><div class="meta"><span class="tag">'+LV[L.i]+"</span>"+(L.up?'<span class="tag up">↑ from '+L.from+"</span>":"")+(t.st==="done"?rev:left(t.dl))+tmTag(t)+(t.by&&t.by!==ME&&NM[t.by]?"<span>by "+esc(NM[t.by])+"</span>":"")+'</div><div class="acts">'+(rw?'<button class="btn'+(t.st==="done"?" alt":"")+'" data-a="'+(t.st==="done"?"to":"go")+'"'+(t.st==="done"?' data-st="todo"':"")+' data-id="'+t.id+'">'+(t.st==="todo"?"Start":t.st==="doing"?"Mark done ✓":"Reopen")+'</button>':"")+cmb+(rw?'<button data-a="more" data-id="'+t.id+'" aria-label="More actions">⋯</button>':"")+'</div></div>';
 }
 function vBoard(){
  var sg='<div class="seg" role="tablist" aria-label="Board view"><button data-bv="board" aria-pressed="'+(bview==="board")+'">Board</button><button data-bv="table" aria-pressed="'+(bview==="table")+'">Table</button></div>';
@@ -353,8 +366,10 @@ function vToday(){
  var focus='<div class="panel"><h2>Do these next</h2>'+(top.length?top.map(function(t){var L=lvl(t);return '<div class="row l'+L.i+'"><div class="name">'+esc(t.n)+'<div class="meta"><span class="tag">'+LV[L.i]+"</span>"+left(t.dl)+'</div></div><button class="btn alt" data-a="go" data-id="'+t.id+'">'+(t.st==="todo"?"Start":"Finish")+"</button></div>"}).join(""):'<div class="empty">Nothing pending. Add a task above.</div>')+"</div>";
  var due=tk.filter(function(t){return t.st==="done"&&t.nextRev&&diff(t.nextRev)<=0});
  var rev='<div class="panel"><h2>Revise today ('+due.length+')</h2>'+(due.length?due.map(function(t){return '<div class="row l0"><div class="name">'+esc(t.n)+'<div class="meta"><span>Round '+(t.step+1)+" of "+INT.length+'</span></div></div><button class="btn" data-a="rev" data-id="'+t.id+'">Revised</button></div>'}).join(""):'<div class="empty">No revisions due. Finished tasks come back after 1, 3, 7, 14 and 30 days.</div>')+"</div>";
- var hab='<div class="panel"><h2>Daily habits <button class="btn alt" data-go="check" data-date="'+d+'" style="min-height:32px;float:right">Check-in</button></h2>'+(dl.length?dl.map(function(t){var on=!!(t.log&&t.log[d]);return '<div class="row l'+lvl(t).i+'"><button class="chk" aria-pressed="'+on+'" aria-label="Mark done today" data-a="hab" data-id="'+t.id+'">'+(on?"✓":"")+'</button><div class="name">'+esc(t.n)+(t.fq==="w"?'<div class="meta"><span>'+wc(t,wk(d))+" of "+t.tg+" this week</span></div>":"")+'</div><button class="acts" style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-a="del" data-id="'+t.id+'" aria-label="Delete habit">×</button></div>'}).join(""):'<div class="empty">No habits yet. Add one with type “Daily habit”.</div>')+"</div>";
- return '<div class="grid2"><div>'+prog+focus+'</div><div>'+rev+hab+"</div></div>";
+ var hab='<div class="panel"><h2>Daily habits <button class="btn alt" data-go="check" data-date="'+d+'" style="min-height:32px;float:right">Check-in</button></h2>'+(dl.length?dl.map(function(t){var on=!!(t.log&&t.log[d]);return '<div class="row l'+lvl(t).i+'"><button class="chk" aria-pressed="'+on+'" aria-label="Mark done today" data-a="hab" data-id="'+t.id+'">'+(on?"✓":"")+'</button><div class="name">'+esc(t.n)+habMeta(t,d)+'</div><button class="acts" style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-a="tm" data-id="'+t.id+'" aria-label="Set time and alarm">⏰</button><button class="acts" style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-a="del" data-id="'+t.id+'" aria-label="Delete habit">×</button></div>'}).join(""):'<div class="empty">No habits yet. Add one with type “Daily habit”.</div>')+"</div>";
+ var timed=S.tasks.filter(function(t){return X(t).ts&&(t.ty==="task"?elig(t,d):t.ty==="daily"&&ap(t,d)&&(!t.own||t.own===ME))}).sort(function(a,b){return X(a).ts.localeCompare(X(b).ts)});
+ var sched='<div class="panel"><h2>Today’s schedule</h2>'+(timed.length?timed.map(function(t){var dn=t.ty==="daily"&&t.log&&t.log[d]===1;return '<div class="row l'+lvl(t).i+'"><div class="name"><span class="tsub">'+esc(tmTxt(t))+'</span><br>'+esc(t.n)+(dn?" ✓":"")+'</div><button class="btn alt" data-a="tm" data-id="'+t.id+'" aria-label="Edit time and alarm">⏰</button></div>'}).join(""):'<div class="empty">No timed tasks today. Add a start time to a task to see your day here.</div>')+"</div>";
+ return '<div class="grid2"><div>'+sched+prog+focus+'</div><div>'+rev+hab+"</div></div>";
 }
 function vTimer(){
  return '<div class="panel"><h2>'+(T.mode==="f"?"Focus session":"Break")+'</h2><div class="time" id="tm"></div><div class="center"><button class="btn" id="tgo">'+(T.id?"Pause":"Start")+'</button><button class="btn alt" id="trs">Reset</button><button class="btn alt" id="tmd">Switch to '+(T.mode==="f"?"5 min break":"25 min focus")+'</button></div><p class="hint" style="text-align:center;margin-top:12px">25 minutes of focus, then a 5 minute break. Each finished session adds to today’s focus minutes and keeps your streak.</p></div>';
@@ -384,7 +399,7 @@ function render(soft){
 }
 
 function creD(t){return fmt(new Date(t.id))}
-function ap(t,d){return t.fq==="o"?t.od===d:creD(t)<=d}
+function ap(t,d){if(t.fq==="o")return t.od===d;var e=X(t).ed;return creD(t)<=d&&(!e||d<=e)}
 function wk(d){var x=new Date(d+"T00:00:00");x.setDate(x.getDate()-((x.getDay()+6)%7));return fmt(x)}
 function wc(t,s){var n=0;for(var i=0;i<7;i++){if(t.log&&t.log[addDays(s,i)]===1)n++}return n}
 function habs(){return S.tasks.filter(function(t){return t.ty==="daily"&&(!t.own||t.own===ME)})}
@@ -395,7 +410,7 @@ var ckD=today();
 function ckOpen(d){ckD=d||today();ckDraw();$("ck").hidden=false}
 function ckDraw(){
  var d=ckD,y=addDays(today(),-1),list=habs().filter(function(t){return ap(t,d)});
- $("ckb").innerHTML='<h2>Daily check-in</h2><div class="center" style="margin-bottom:8px"><button class="btn'+(d===y?"":" alt")+'" data-d="'+y+'">Yesterday</button><button class="btn'+(d===today()?"":" alt")+'" data-d="'+today()+'">Today</button></div><p class="hint">'+(d===today()||d===y?"":d+" · ")+'Did you finish these?</p>'+(list.length?list.map(function(t){var v=t.log&&t.log[d];return '<div class="row l'+lvl(t).i+'"><div class="name">'+esc(t.n)+'<div class="meta"><span>'+(t.fq==="w"?wc(t,wk(d))+" of "+t.tg+" this week":t.fq==="o"?"This day only":"Every day")+'</span></div></div><div class="yn" data-id="'+t.id+'"><button class="y'+(v===1?" on":"")+'" data-v="1">Yes</button><button class="n'+(v===0?" on":"")+'" data-v="0">No</button></div></div>'}).join(""):'<div class="empty">Nothing to check yet. Add a daily or weekly habit.</div>')+(ro()?'':'<form id="ckf" style="grid-template-columns:1fr auto"><input id="cki" maxlength="80" placeholder="Add something for this day only" aria-label="Add a task for this day"><button class="btn" type="submit">Add</button></form>')+'<button class="btn" id="ckx" style="width:100%;margin-top:12px">Done</button>';
+ $("ckb").innerHTML='<h2>Daily check-in</h2><div class="center" style="margin-bottom:8px"><button class="btn'+(d===y?"":" alt")+'" data-d="'+y+'">Yesterday</button><button class="btn'+(d===today()?"":" alt")+'" data-d="'+today()+'">Today</button></div><p class="hint">'+(d===today()||d===y?"":d+" · ")+'Did you finish these?</p>'+(list.length?list.map(function(t){var v=t.log&&t.log[d];return '<div class="row l'+lvl(t).i+'"><div class="name">'+esc(t.n)+'<div class="meta"><span>'+(t.fq==="w"?wc(t,wk(d))+" of "+t.tg+" this week":t.fq==="o"?"This day only":"Every day"+(X(t).ed?" until "+X(t).ed:""))+(X(t).ts?" · "+tmTxt(t):"")+'</span></div></div><div class="yn" data-id="'+t.id+'"><button class="y'+(v===1?" on":"")+'" data-v="1">Yes</button><button class="n'+(v===0?" on":"")+'" data-v="0">No</button></div></div>'}).join(""):'<div class="empty">Nothing to check yet. Add a daily or weekly habit.</div>')+(ro()?'':'<form id="ckf" style="grid-template-columns:1fr auto"><input id="cki" maxlength="80" placeholder="Add something for this day only" aria-label="Add a task for this day"><button class="btn" type="submit">Add</button></form>')+'<button class="btn" id="ckx" style="width:100%;margin-top:12px">Done</button>';
 }
 var CK=$("ck");
 CK.addEventListener("click",function(e){
@@ -512,6 +527,7 @@ V.addEventListener("click",function(e){
  var t=find(b.dataset.id),a=b.dataset.a;if(!t)return;
  if(a==="cm"){cmOpen(t.id);return}
  if(a==="more"){asOpen(t.id);return}
+ if(a==="tm"){asTime(t.id);return}
  if(ro()&&a!=="hab"){denied();return}
  if(a==="del"){S.tasks=S.tasks.filter(function(x){return x.id!==t.id});if(live&&DB)CMT.filter(function(c){return c.tid===t.id}).forEach(function(c){DB.doc("comments/"+c.id).delete().catch(fail)});save();render()}
  else if(a==="m"){var k=COLS.map(function(c){return c[0]}),n=k[k.indexOf(t.st)+ +b.dataset.d];if(n)move(t,n)}
@@ -527,8 +543,13 @@ V.addEventListener("drop",function(e){var c=e.target.closest(".col");if(!c||!dra
 
 $("f").addEventListener("submit",function(e){
  e.preventDefault();if(ro()){denied();return}var n=$("name").value.trim();if(!n)return;
- var v=$("ty").value;S.tasks.push({id:Date.now(),n:n,dl:$("dl").value||"",p:+$("pr").value,ty:v==="task"?"task":"daily",fq:v==="weekly"?"w":"d",by:ME,tg:Math.min(7,Math.max(1,+$("tg").value||3)),st:"todo",step:0,log:{}});
- save();$("name").value="";$("dl").value="";tab=$("ty").value==="task"?"board":"today";$("addBox").hidden=true;render();
+ var v=$("ty").value,isT=v==="task",id=Date.now(),ts=$("ts").value,te=$("te").value;
+ if(te&&!ts){toast("Set a start time first");return}
+ if(ts&&te&&te<=ts){toast("End time must be after the start time");return}
+ S.tasks.push({id:id,n:n,dl:isT?($("dl").value||""):"",p:+$("pr").value,ty:isT?"task":"daily",fq:v==="weekly"?"w":"d",by:ME,tg:Math.min(7,Math.max(1,+$("tg").value||3)),st:"todo",step:0,log:{}});
+ setX(id,{ed:isT?"":$("dl").value,od:isT?$("od").value:"",ts:ts,te:te,al:$("al").value});
+ if(ts)askNotif();
+ save();$("name").value="";$("dl").value="";$("od").value="";$("ts").value="";$("te").value="";$("al").value="0";tab=isT?"board":"today";$("addBox").hidden=true;render();
 });
 document.querySelector(".tabs").addEventListener("click",function(e){var b=e.target.closest("button[data-t]");if(b){tab=b.dataset.t;render()}});
 $("theme").addEventListener("click",function(){
@@ -599,27 +620,147 @@ CM.addEventListener("submit",function(e){
 });
 document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!CM.hidden){CM.hidden=true;render(true)}});
 
+/* ---- extras: end date, time slot, alarms (kept on this device so shared-board rules are not affected) ---- */
+var XK="study-planner-ext",X0={},asMode="";
+function loadX(){try{X0=JSON.parse(localStorage.getItem(XK))||{}}catch(e){X0={}}}
+function saveX(){try{localStorage.setItem(XK,JSON.stringify(X0))}catch(e){}}
+function X(t){return X0[t.id]||{}}
+function setX(id,o){
+ var c={};["ed","od","ts","te"].forEach(function(k){if(o[k])c[k]=o[k]});
+ if(c.ts&&+o.al)c.al=+o.al;
+ if(Object.keys(c).length)X0[id]=c;else delete X0[id];
+ saveX();
+}
+function tmMin(s){var p=String(s||"").split(":");return(+p[0])*60+(+p[1])}
+function tmTxt(t){var x=X(t);if(!x.ts)return"";return x.ts+(x.te?" – "+x.te:"")+(x.al===-1?"":" 🔔")}
+function tmTag(t){var s=tmTxt(t);return s?'<span class="tag">⏰ '+esc(s)+"</span>":""}
+function endTxt(e){var n=diff(e);return n<0?"Ended":n===0?"Ends today":n===1?"Ends tomorrow":n+" days left"}
+function habMeta(t,d){
+ var p=[],x=X(t);
+ if(t.fq==="w")p.push(wc(t,wk(d))+" of "+t.tg+" this week");
+ if(x.ed)p.push("Until "+fdate(x.ed)+" · "+endTxt(x.ed));
+ if(x.ts)p.push("⏰ "+tmTxt(t));
+ return p.length?'<div class="meta">'+p.map(function(s){return"<span>"+esc(s)+"</span>"}).join("")+"</div>":"";
+}
+function alOpts(sel){return[[0,"At start time"],[5,"5 minutes before"],[15,"15 minutes before"],[30,"30 minutes before"],[-1,"No alarm"]].map(function(o){return'<option value="'+o[0]+'"'+(o[0]===sel?" selected":"")+">"+o[1]+"</option>"}).join("")}
+/* does this item have its time slot today? */
+function elig(t,d){
+ if(t.ty==="task"){if(t.st==="done")return false;var x=X(t);return x.od?x.od===d:(!t.dl||d<=t.dl)}
+ if(t.ty==="daily"){if(t.own&&t.own!==ME)return false;return ap(t,d)&&!(t.log&&t.log[d]===1)}
+ return false;
+}
+function timeDraw(t){
+ var x=X(t),hab=t.ty==="daily"&&t.fq!=="o",one=t.ty==="task";
+ $("asb").innerHTML='<h2>'+esc(t.n)+'</h2><p class="hint">Time and alarm. Saved on this device.</p><div class="stk">'
+  +(hab?'<label>End date (last day, optional)<input id="xEd" type="date" value="'+(x.ed||"")+'"></label>':"")
+  +(one?'<label>Do it on (optional, blank = every day until done)<input id="xOd" type="date" value="'+(x.od||"")+'"></label>':"")
+  +'<label>Start time<input id="xTs" type="time" value="'+(x.ts||"")+'"></label><label>End time<input id="xTe" type="time" value="'+(x.te||"")+'"></label>'
+  +'<label>Alarm<select id="xAl">'+alOpts(x.al||0)+'</select></label>'
+  +'<button class="btn alt" data-ac="test">Test alarm sound</button><button class="btn" data-ac="tsave">Save</button><button class="btn alt" data-ac="x">Cancel</button></div>';
+}
+function asTime(id){asT=id;asMode="time";asDraw();AS.hidden=false}
+function saveTime(t){
+ var ts=$("xTs").value,te=$("xTe").value;
+ if(te&&!ts){toast("Set a start time first");return}
+ if(ts&&te&&te<=ts){toast("End time must be after the start time");return}
+ setX(t.id,{ed:$("xEd")?$("xEd").value:"",od:$("xOd")?$("xOd").value:"",ts:ts,te:te,al:$("xAl").value});
+ if(ts)askNotif();
+ AS.hidden=true;render();toast(ts?"Time and alarm saved":"Saved");
+}
+/* alarm: default sound made with Web Audio, plus notification, vibration and a pop-up */
+var AC=null,alT=null,alQ=[],snz={},FK="study-planner-fired";
+function audio(){try{if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")AC.resume()}catch(e){}}
+["pointerdown","keydown","touchstart"].forEach(function(ev){document.addEventListener(ev,audio,{passive:true})});
+function beep(){
+ if(!AC)return;
+ var t0=AC.currentTime;
+ for(var i=0;i<4;i++){
+  var o=AC.createOscillator(),g=AC.createGain(),s=t0+i*.2;
+  o.type="square";o.frequency.value=i%2?988:880;
+  g.gain.setValueAtTime(.0001,s);g.gain.exponentialRampToValueAtTime(.22,s+.01);g.gain.exponentialRampToValueAtTime(.0001,s+.16);
+  o.connect(g);g.connect(AC.destination);o.start(s);o.stop(s+.17);
+ }
+ try{if(navigator.vibrate)navigator.vibrate([200,100,200])}catch(e){}
+}
+var ALARM_MS=8000;
+function ringStart(){audio();beep();clearInterval(alT);var t0=Date.now();alT=setInterval(function(){if(Date.now()-t0>=ALARM_MS-500){clearInterval(alT);alT=null;return}beep()},1000)}
+function ringStop(){clearInterval(alT);alT=null}
+function askNotif(){audio();try{if(window.Notification&&Notification.permission==="default")Notification.requestPermission()}catch(e){}}
+function notify(list){
+ try{if(window.Notification&&Notification.permission==="granted")new Notification("Study Planner",{body:list.map(function(t){return t.n+" ("+tmTxt(t)+")"}).join("\n")})}catch(e){}
+}
+function almDraw(){
+ var q=alQ;
+ if(!q.length){$("alm").hidden=true;ringStop();return}
+ var t=q[0].t;
+ $("almb").innerHTML='<h2>⏰ Time for your task</h2><div class="name" style="font-size:1.15rem;margin:6px 0">'+esc(t.n)+'</div><p class="hint">'+esc(tmTxt(t))+(q.length>1?" · "+(q.length-1)+" more waiting":"")+'</p><div class="stk"><button class="btn" data-al="stop">Stop alarm</button><button class="btn alt" data-al="snz">Snooze 5 min</button></div>';
+ $("alm").hidden=false;
+}
+function almCheck(){
+ var now=new Date(),d=fmt(now),nm=now.getHours()*60+now.getMinutes(),fired={},hit=[],raw;
+ try{raw=JSON.parse(localStorage.getItem(FK))||{};Object.keys(raw).forEach(function(k){if(k.split("|")[1]===d)fired[k]=1})}catch(e){}
+ S.tasks.forEach(function(t){
+  var x=X(t);if(!x.ts||x.al===-1||!elig(t,d))return;
+  var k=t.id+"|"+d,at=tmMin(x.ts)-(x.al||0);
+  if(snz[k]){if(Date.now()>=snz[k]){delete snz[k];hit.push(t)}return}
+  if(fired[k])return;
+  if(nm>=at&&nm<at+30){fired[k]=1;hit.push(t)}
+ });
+ try{localStorage.setItem(FK,JSON.stringify(fired))}catch(e){}
+ if(!hit.length)return;
+ hit.forEach(function(t){if(!alQ.some(function(a){return a.t.id===t.id}))alQ.push({t:t})});
+ almDraw();ringStart();notify(hit);
+}
+$("alm").addEventListener("click",function(e){
+ var b=e.target.closest("button[data-al]");if(!b)return;
+ var it=alQ.shift();ringStop();
+ if(b.dataset.al==="snz"&&it)snz[it.t.id+"|"+today()]=Date.now()+300000;
+ almDraw();if(alQ.length)ringStart();
+});
+setInterval(almCheck,15000);
+document.addEventListener("visibilitychange",function(){if(!document.hidden)almCheck()});
+
+/* add-task form: show only the fields that fit the chosen type */
+$("al").innerHTML=alOpts(0);
+function fUi(){var v=$("ty").value;$("dlT").textContent=v==="task"?"Deadline":"End date (last day, optional)";$("odL").hidden=v!=="task";$("tgL").hidden=v!=="weekly"}
+$("ty").addEventListener("change",fUi);fUi();
+$("tstA").onclick=function(){audio();beep()};
+
 /* table view + JPG export */
 function leftTxt(dl){if(!dl)return"";var n=diff(dl);return n<0?"Overdue "+(-n)+"d":n===0?"Due today":n===1?"Due tomorrow":n+" days left"}
 function fdate(dl){return dl?new Date(dl+"T00:00:00").toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}):"No deadline"}
 function byName(t){return !live||!t.by?"":(t.by===ME?MEN:(NM[t.by]||"Student"))}
+var tsel={todo:true,doing:true,done:true,reg:false};
+function isReg(t){return t.ty==="daily"}
+function selLabel(){var a=COLS.filter(function(c){return tsel[c[0]]}).map(function(c){return c[1]});if(tsel.reg)a.push("Daily tasks");return a.join(" + ")}
+function regList(){return habs().filter(function(t){var e=X(t).ed;return t.fq!=="o"&&(!e||e>=today())}).sort(function(a,b){return a.n.localeCompare(b.n)})}
 function tblRows(){
- return S.tasks.filter(function(t){return t.ty==="task"&&(tfil==="all"||t.st===tfil)}).sort(function(a,b){return (a.st==="done"?1:0)-(b.st==="done"?1:0)||sortT(a,b)});
+ var r=S.tasks.filter(function(t){return t.ty==="task"&&tsel[t.st]}).sort(function(a,b){return (a.st==="done"?1:0)-(b.st==="done"?1:0)||sortT(a,b)});
+ return tsel.reg?r.concat(regList()):r;
 }
-var SC={todo:"l2",doing:"l1",done:"l0"};
+var SC={todo:"l2",doing:"l1",done:"l0"},SCOL={todo:"#d98a00",doing:"#3b5bff",done:"#2f9467"};
 function stName(k){return COLS.filter(function(c){return c[0]===k})[0][1]}
+function stInfo(t){return isReg(t)?{n:t.fq==="w"?"Weekly":"Daily",cls:"reg",col:"#7a4fd6"}:{n:stName(t.st),cls:SC[t.st],col:SCOL[t.st]}}
+function dlInfo(t){
+ if(isReg(t)){var e=X(t).ed,sb=t.fq==="w"?t.tg+"× per week":"Every day";return[e?"Until "+fdate(e):"No end date",e?sb+" · "+endTxt(e):sb]}
+ return[fdate(t.dl),t.st!=="done"?leftTxt(t.dl):""];
+}
+function timeLine(t){var x=X(t);return x.ts?x.ts+(x.te?" – "+x.te:""):""}
 function vTable(){
  names(S.tasks.map(function(t){return t.by}));
  var rows=tblRows(),showBy=live;
- var opts=[["all","All statuses"]].concat(COLS).map(function(c){return '<option value="'+c[0]+'"'+(tfil===c[0]?" selected":"")+">"+c[1]+"</option>"}).join("");
- var bar='<div class="tbar"><select data-tfil aria-label="Filter by status">'+opts+'</select><button class="btn" data-tbl="jpg" type="button">Download JPG</button>'+(navigator.share?'<button class="btn alt" data-tbl="share" type="button">Share</button>':"")+"</div>";
+ var chips='<div class="fchips" role="group" aria-label="Choose what to show and download">'+COLS.concat([["reg","Daily tasks"]]).map(function(c){
+  var n=c[0]==="reg"?regList().length:S.tasks.filter(function(t){return t.ty==="task"&&t.st===c[0]}).length;
+  return '<button type="button" data-tf="'+c[0]+'" aria-pressed="'+!!tsel[c[0]]+'">'+(tsel[c[0]]?"✓ ":"")+c[1]+'<span class="cnt">'+n+"</span></button>";
+ }).join("")+"</div>";
+ var bar='<div class="tbar"><button class="btn" data-tbl="jpg" type="button">Download JPG</button>'+(navigator.share?'<button class="btn alt" data-tbl="share" type="button">Share</button>':"")+"</div>";
  var body=rows.length?rows.map(function(t,i){
-  var L=lvl(t),lt=leftTxt(t.dl);
-  return '<tr data-id="'+t.id+'"><td class="hm">'+(i+1)+'</td><td><span class="pri l'+L.i+'">'+LV[L.i]+'</span></td><td class="tn">'+esc(t.n)+'</td><td>'+esc(fdate(t.dl))+(lt&&t.st!=="done"?'<div class="tsub">'+esc(lt)+"</div>":"")+'</td><td><span class="stt '+SC[t.st]+'">'+stName(t.st)+'</span></td>'+(showBy?'<td class="hm">'+esc(byName(t)||"—")+"</td>":"")+"</tr>";
- }).join(""):'<tr><td colspan="6" class="empty">No tasks to show.</td></tr>';
- return '<p class="hint">All your tasks at a glance, most urgent first. Tap a row to move, comment on or delete it. Use Download JPG to save the table as a picture you can share.</p>'+bar+'<div class="tblwrap"><table class="tbl"><thead><tr><th class="hm">#</th><th>Priority</th><th>Task</th><th>Deadline</th><th>Status</th>'+(showBy?'<th class="hm">Added by</th>':"")+'</tr></thead><tbody>'+body+"</tbody></table></div>";
+  var L=lvl(t),si=stInfo(t),di=dlInfo(t),tl=timeLine(t);
+  return '<tr data-id="'+t.id+'"><td class="hm">'+(i+1)+'</td><td><span class="pri l'+L.i+'">'+LV[L.i]+'</span></td><td class="tn">'+esc(t.n)+(tl?'<div class="tsub">⏰ '+esc(tl)+"</div>":"")+'</td><td>'+esc(di[0])+(di[1]?'<div class="tsub">'+esc(di[1])+"</div>":"")+'</td><td><span class="stt '+si.cls+'">'+si.n+"</span></td>"+(showBy?'<td class="hm">'+esc(isReg(t)?"—":(byName(t)||"—"))+"</td>":"")+"</tr>";
+ }).join(""):'<tr><td colspan="6" class="empty">Nothing selected, or nothing to show.</td></tr>';
+ return '<p class="hint">Pick any mix of To do, In progress, Done and Daily tasks. The table and the JPG show exactly what is selected. Tap a row to change its status, time or alarm.</p>'+chips+bar+'<div class="tblwrap"><table class="tbl"><thead><tr><th class="hm">#</th><th>Priority</th><th>Task</th><th>Deadline</th><th>Status</th>'+(showBy?'<th class="hm">Added by</th>':"")+'</tr></thead><tbody>'+body+"</tbody></table></div>";
 }
-V.addEventListener("change",function(e){if(e.target.matches&&e.target.matches("select[data-tfil]")){tfil=e.target.value;render()}});
+
 function wrapTxt(ctx,text,maxW,maxL){
  var out=[],cur="";
  String(text).split(/\s+/).forEach(function(w){
@@ -634,41 +775,42 @@ function wrapTxt(ctx,text,maxW,maxL){
 function rrect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
 function tblDraw(){
  var rows=tblRows(),showBy=live,W=1240,pad=40,rowH=68,headH=118,thH=48,footH=60,F='"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif';
- var cols=showBy?[["#",50],["Priority",130],["Task",400],["Deadline",200],["Status",150],["Added by",190]]:[["#",50],["Priority",130],["Task",590],["Deadline",200],["Status",150]];
+ var cols=showBy?[["#",50],["Priority",130],["Task",380],["Deadline",230],["Status",150],["Added by",180]]:[["#",50],["Priority",130],["Task",560],["Deadline",260],["Status",150]];
  var tw=0;cols.forEach(function(c){tw+=c[1]});pad=Math.round((W-tw)/2);
  var H=headH+thH+Math.max(1,rows.length)*rowH+footH;
  var sc=Math.min(2,16000/H),cv=document.createElement("canvas");cv.width=Math.round(W*sc);cv.height=Math.round(H*sc);
  var c=cv.getContext("2d");c.scale(sc,sc);c.textBaseline="alphabetic";
- var LC=["#2f9467","#3b5bff","#d98a00","#e5484d"],SCOL={todo:"#d98a00",doing:"#3b5bff",done:"#2f9467"};
+ var LC=["#2f9467","#3b5bff","#d98a00","#e5484d"];
  c.fillStyle="#ffffff";c.fillRect(0,0,W,H);
  c.fillStyle="#14213d";c.font="800 36px "+F;c.fillText("Study Planner",pad,58);
- var done=rows.filter(function(t){return t.st==="done"}).length;
+ var done=rows.filter(function(t){return !isReg(t)&&t.st==="done"}).length;
  c.fillStyle="#667089";c.font="500 20px "+F;
- c.fillText("Task list · "+new Date().toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long",year:"numeric"})+" · "+rows.length+" task"+(rows.length===1?"":"s")+" · "+done+" done"+(tfil==="all"?"":" · "+stName(tfil)),pad,92);
+ var sub=new Date().toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"})+" · "+rows.length+" item"+(rows.length===1?"":"s")+(tsel.done?" · "+done+" done":"")+" · "+selLabel();
+ c.fillText(wrapTxt(c,sub,W-2*pad,1)[0],pad,92);
  var y=headH;
  c.fillStyle="#eaeefc";rrect(c,pad,y,tw,thH,10);c.fill();
  c.fillStyle="#667089";c.font="700 15px "+F;
  var x=pad;cols.forEach(function(k){c.fillText(k[0].toUpperCase(),x+14,y+30);x+=k[1]});
  y+=thH;
- if(!rows.length){c.fillStyle="#667089";c.font="500 20px "+F;c.fillText("No tasks to show.",pad+14,y+42)}
+ if(!rows.length){c.fillStyle="#667089";c.font="500 20px "+F;c.fillText("Nothing selected, or nothing to show.",pad+14,y+42)}
  rows.forEach(function(t,i){
   if(i%2===1){c.fillStyle="#f6f8fd";c.fillRect(pad,y,tw,rowH)}
   c.fillStyle="#e1e5ef";c.fillRect(pad,y+rowH-1,tw,1);
-  var L=lvl(t),x=pad,cy=y+rowH/2;
+  var L=lvl(t),x=pad,cy=y+rowH/2,si=stInfo(t),di=dlInfo(t),tl=timeLine(t);
   c.fillStyle="#667089";c.font="600 18px "+F;c.fillText(String(i+1),x+14,cy+6);x+=cols[0][1];
   var pt=LV[L.i];c.font="700 17px "+F;var pw=c.measureText(pt).width+26;
   c.lineWidth=2;c.strokeStyle=LC[L.i];rrect(c,x+8,cy-15,pw,30,15);c.stroke();c.fillStyle="#14213d";c.fillText(pt,x+21,cy+6);x+=cols[1][1];
   c.fillStyle="#14213d";c.font="700 20px "+F;
-  var ln=wrapTxt(c,t.n,cols[2][1]-24,2);
-  if(ln.length===1)c.fillText(ln[0],x+14,cy+7);else{c.fillText(ln[0],x+14,cy-4);c.fillText(ln[1],x+14,cy+22)}
+  var ln=wrapTxt(c,t.n,cols[2][1]-24,tl?1:2);
+  if(tl){c.fillText(ln[0],x+14,cy-4);c.fillStyle="#667089";c.font="500 15px "+F;c.fillText("Time "+tl,x+14,cy+22)}
+  else if(ln.length===1)c.fillText(ln[0],x+14,cy+7);else{c.fillText(ln[0],x+14,cy-4);c.fillText(ln[1],x+14,cy+22)}
   x+=cols[2][1];
-  var lt=t.st!=="done"?leftTxt(t.dl):"";
-  c.fillStyle="#14213d";c.font="600 18px "+F;c.fillText(fdate(t.dl),x+14,lt?cy-3:cy+6);
-  if(lt){c.font="500 15px "+F;c.fillStyle=(t.dl&&diff(t.dl)<=1)?"#e5484d":"#667089";c.fillText(lt,x+14,cy+18)}
+  c.fillStyle="#14213d";c.font="600 18px "+F;c.fillText(wrapTxt(c,di[0],cols[3][1]-24,1)[0],x+14,di[1]?cy-3:cy+6);
+  if(di[1]){c.font="500 15px "+F;c.fillStyle=(!isReg(t)&&t.dl&&diff(t.dl)<=1)?"#e5484d":"#667089";c.fillText(wrapTxt(c,di[1],cols[3][1]-24,1)[0],x+14,cy+18)}
   x+=cols[3][1];
-  var st=stName(t.st);c.font="700 17px "+F;var sw=c.measureText(st).width+26;
-  c.lineWidth=2;c.strokeStyle=SCOL[t.st];rrect(c,x+8,cy-15,sw,30,15);c.stroke();c.fillStyle="#14213d";c.fillText(st,x+21,cy+6);x+=cols[4][1];
-  if(showBy){c.fillStyle="#14213d";c.font="500 18px "+F;var nmx=wrapTxt(c,byName(t)||"—",cols[5][1]-24,1);c.fillText(nmx[0],x+14,cy+6)}
+  c.font="700 17px "+F;var sw=c.measureText(si.n).width+26;
+  c.lineWidth=2;c.strokeStyle=si.col;rrect(c,x+8,cy-15,sw,30,15);c.stroke();c.fillStyle="#14213d";c.fillText(si.n,x+21,cy+6);x+=cols[4][1];
+  if(showBy){c.fillStyle="#14213d";c.font="500 18px "+F;var nmx=wrapTxt(c,isReg(t)?"—":(byName(t)||"—"),cols[5][1]-24,1);c.fillText(nmx[0],x+14,cy+6)}
   y+=rowH;
  });
  c.fillStyle="#667089";c.font="500 15px "+F;c.fillText("Generated by Study Planner · "+new Date().toLocaleString(),pad,H-24);
@@ -695,11 +837,12 @@ var toastT=null;
 function toast(m){var e=$("toast");if(!e){e=document.createElement("div");e.id="toast";e.className="toast";e.setAttribute("role","status");document.body.appendChild(e)}e.textContent=m;e.hidden=false;clearTimeout(toastT);toastT=setTimeout(function(){e.hidden=true},2200)}
 function delTask(t){S.tasks=S.tasks.filter(function(x){return x.id!==t.id});if(live&&DB)CMT.filter(function(c){return c.tid===t.id}).forEach(function(c){DB.doc("comments/"+c.id).delete().catch(fail)});save();render()}
 var AS=$("as"),asT=null;
-function asOpen(id){asT=id;asDraw();AS.hidden=false}
+function asOpen(id){asT=id;asMode="";asDraw();AS.hidden=false}
 function asDraw(){
  var t=find(asT);if(!t){AS.hidden=true;return}
+ if(asMode==="time"){timeDraw(t);return}
  var rw=!ro();
- $("asb").innerHTML='<h2>'+esc(t.n)+'</h2>'+(rw?'<p class="hint">Move to</p><div class="stk">'+COLS.map(function(c){var cur=t.st===c[0];return '<button class="btn'+(cur?"":" alt")+'" data-st="'+c[0]+'"'+(cur?' aria-current="true"':"")+'>'+c[1]+(cur?" (current)":"")+'</button>'}).join("")+'</div>':'')+(live?'<button class="btn alt" data-ac="cm" style="width:100%;margin-top:10px">💬 Comments ('+cmCount(t.id)+')</button>':'')+(rw?'<button class="btn alt" data-ac="del" style="width:100%;margin-top:10px;color:var(--l3)">Delete task</button>':'')+'<button class="btn alt" data-ac="x" style="width:100%;margin-top:10px">Close</button>';
+ $("asb").innerHTML='<h2>'+esc(t.n)+'</h2>'+(rw?'<p class="hint">Move to</p><div class="stk">'+COLS.map(function(c){var cur=t.st===c[0];return '<button class="btn'+(cur?"":" alt")+'" data-st="'+c[0]+'"'+(cur?' aria-current="true"':"")+'>'+c[1]+(cur?" (current)":"")+'</button>'}).join("")+'</div>':'')+'<button class="btn alt" data-ac="tm" style="width:100%;margin-top:10px">⏰ Time &amp; alarm</button>'+(live?'<button class="btn alt" data-ac="cm" style="width:100%;margin-top:10px">💬 Comments ('+cmCount(t.id)+')</button>':'')+(rw?'<button class="btn alt" data-ac="del" style="width:100%;margin-top:10px;color:var(--l3)">Delete task</button>':'')+'<button class="btn alt" data-ac="x" style="width:100%;margin-top:10px">Close</button>';
 }
 AS.addEventListener("click",function(e){
  if(e.target===AS){AS.hidden=true;return}
@@ -707,14 +850,18 @@ AS.addEventListener("click",function(e){
  if(b.dataset.st){if(ro()){denied();return}AS.hidden=true;move(t,b.dataset.st);return}
  var a=b.dataset.ac;
  if(a==="x")AS.hidden=true;
+ else if(a==="tm"){asMode="time";asDraw()}
+ else if(a==="test"){audio();beep()}
+ else if(a==="tsave"){saveTime(t)}
  else if(a==="cm"){AS.hidden=true;cmOpen(t.id)}
  else if(a==="del"){if(ro()){denied();return}if(confirm("Delete \""+t.n+"\"?")){AS.hidden=true;delTask(t)}}
 });
 var swiped=false,sw=null;
 V.addEventListener("click",function(e){
  var bv=e.target.closest("button[data-bv]");if(bv){bview=bv.dataset.bv;render();return}
+ var tf=e.target.closest("button[data-tf]");if(tf){tsel[tf.dataset.tf]=!tsel[tf.dataset.tf];render();return}
  var tb=e.target.closest("button[data-tbl]");if(tb){tblExport(tb.dataset.tbl==="share");return}
- var tr=e.target.closest("tr[data-id]");if(tr&&!e.target.closest("button")){asOpen(+tr.dataset.id);return}
+ var tr=e.target.closest("tr[data-id]");if(tr&&!e.target.closest("button")){var th=find(tr.dataset.id);if(th&&th.ty==="daily")asTime(th.id);else asOpen(+tr.dataset.id);return}
  var st=e.target.closest("button[data-stage]");if(st){bcol=st.dataset.stage;render();return}
  var c=e.target.closest(".card");if(!c||e.target.closest("button")||swiped)return;asOpen(+c.dataset.id);
 });
@@ -735,7 +882,7 @@ document.addEventListener("keydown",function(e){if(e.key==="Escape"){if(!AS.hidd
 /* export / import all app data as a JSON file */
 function dmsg(t){$("dmsg").textContent=t}
 $("exp").onclick=function(){
- var data={app:"study-planner",version:2,exported:new Date().toISOString(),tasks:S.tasks,act:S.act,focus:S.focus};
+ var data={app:"study-planner",version:2,exported:new Date().toISOString(),tasks:S.tasks,act:S.act,focus:S.focus,ext:X0};
  var a=document.createElement("a"),u=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
  a.href=u;a.download="study-planner-backup-"+today()+".json";document.body.appendChild(a);a.click();a.remove();
  setTimeout(function(){URL.revokeObjectURL(u)},1000);
@@ -755,11 +902,12 @@ $("impf").onchange=function(){
   var msg="Replace ALL current data with this file ("+tasks.length+" items)? Anything not in the file will be removed."+(live?" Live sync is on, so this also updates the shared board for everyone.":"");
   if(!confirm(msg))return;
   S.tasks=tasks;S.act=(d.act&&typeof d.act==="object")?d.act:{};S.focus=(d.focus&&typeof d.focus==="object")?d.focus:{};
+  X0=(d.ext&&typeof d.ext==="object")?d.ext:{};saveX();
   save();render();dmsg("Imported "+tasks.length+" items.");
  };
  r.readAsText(f);
 };
-load();render();start();
+load();loadX();render();start();almCheck();
 })();
 </script>
 </body>
