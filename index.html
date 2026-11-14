@@ -155,6 +155,14 @@ header .tag{min-height:36px;padding:0 12px!important;display:inline-flex;align-i
 .stt.reg{--c:#7a4fd6}
 label[hidden]{display:none}
 #teamBar[hidden]{display:none}
+/* undo / redo (board toolbar) */
+.hrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px}
+.hrow .seg{margin:0;flex:1}
+.hgrp{display:flex;gap:6px}
+.hb{width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);display:grid;place-items:center;padding:0}
+.hb svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hb:disabled{opacity:.35;cursor:default}
+#asL[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -184,6 +192,7 @@ label[hidden]{display:none}
 <label>Start time (optional)<input id="ts" type="time"></label>
 <label>End time (optional)<input id="te" type="time"></label>
 <label class="full" id="tmL" hidden>Team<select id="tmSel"></select></label>
+<div class="full" id="asL" hidden><span class="hint" style="display:block;margin:0 0 6px">Assign to (optional, pick one or more)</span><div class="fchips" id="asChips" style="margin:0"></div></div>
 <label class="full">Alarm (rings at the start time, default alarm sound)<select id="al"></select></label>
 <button class="btn alt full" type="button" id="tstA">Test alarm sound</button>
 <button class="btn full" type="submit">Add task</button>
@@ -310,6 +319,7 @@ window.claude={use:function(n){
 <script>
 (function(){
 var KEY="study-planner-v2",tab="board",S={tasks:[],act:{},focus:{}};
+var addAs=[],edAs=[],HU=[],HR=[],HC=null,HAP=false;
 var T={mode:"f",left:1500,id:null};
 var LV=["Low","Medium","High","Urgent"],INT=[1,3,7,14,30];
 var COLS=[["todo","To do"],["doing","In progress"],["done","Done"]];
@@ -323,7 +333,7 @@ function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;
 function load(){try{var r=localStorage.getItem(KEY);if(r){S=JSON.parse(r);S.tasks=S.tasks||[];S.act=S.act||{};S.focus=S.focus||{};return}
  var o=JSON.parse(localStorage.getItem("study-planner-v1"));
  if(o)S.tasks=o.map(function(t){return{id:t.id,n:t.n,dl:t.dl,p:t.p,ty:t.ty==="daily"?"daily":"task",st:t.done?"done":"todo",doneOn:t.doneOn,nextRev:t.done?addDays(today(),1):null,step:0,log:t.log||{}}})}catch(e){}}
-function save(){if(!DB){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}push()}
+function save(){if(!HAP)hrec();if(!DB){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}push()}
 function mark(){S.act[today()]=1}
 
 /* smart priority: starting priority + deadline pressure */
@@ -348,13 +358,14 @@ function streak(){var d=today(),n=0;if(!S.act[d])d=addDays(d,-1);while(S.act[d])
 function card(t){
  var L=lvl(t),i=COLS.map(function(c){return c[0]}).indexOf(t.st),rev="",rw=!ro(),cmb=live?'<button data-a="cm" data-id="'+t.id+'" aria-label="Comments">💬 '+cmCount(t.id)+"</button>":"";
  if(t.st==="done"){rev=t.nextRev?(diff(t.nextRev)<=0?'<span class="late">Revise today</span>':"<span>Revise in "+diff(t.nextRev)+"d</span>"):"<span>Mastered ✓</span>"}
- return '<div class="card l'+L.i+'" draggable="'+rw+'" data-id="'+t.id+'"><div class="name">'+esc(t.n)+'</div><div class="meta"><span class="tag">'+LV[L.i]+"</span>"+(L.up?'<span class="tag up">↑ from '+L.from+"</span>":"")+(t.st==="done"?rev:left(t.dl))+tmTag(t)+(!curTeam&&t.team&&TM[t.team]?'<span class="tag">'+esc(TM[t.team].name)+"</span>":"")+(t.by&&t.by!==ME&&(t.byn||NM[t.by])?"<span>by "+esc(t.byn||NM[t.by])+"</span>":"")+'</div><div class="acts">'+(rw?'<button class="btn'+(t.st==="done"?" alt":"")+'" data-a="'+(t.st==="done"?"to":"go")+'"'+(t.st==="done"?' data-st="todo"':"")+' data-id="'+t.id+'">'+(t.st==="todo"?"Start":t.st==="doing"?"Mark done ✓":"Reopen")+'</button>':"")+cmb+(rw?'<button data-a="more" data-id="'+t.id+'" aria-label="More actions">⋯</button>':"")+'</div></div>';
+ return '<div class="card l'+L.i+'" draggable="'+rw+'" data-id="'+t.id+'"><div class="name">'+esc(t.n)+'</div><div class="meta"><span class="tag">'+LV[L.i]+"</span>"+(L.up?'<span class="tag up">↑ from '+L.from+"</span>":"")+(t.st==="done"?rev:left(t.dl))+tmTag(t)+asTag(t)+(!curTeam&&t.team&&TM[t.team]?'<span class="tag">'+esc(TM[t.team].name)+"</span>":"")+(t.by&&t.by!==ME&&(t.byn||NM[t.by])?"<span>by "+esc(t.byn||NM[t.by])+"</span>":"")+'</div><div class="acts">'+(rw?'<button class="btn'+(t.st==="done"?" alt":"")+'" data-a="'+(t.st==="done"?"to":"go")+'"'+(t.st==="done"?' data-st="todo"':"")+' data-id="'+t.id+'">'+(t.st==="todo"?"Start":t.st==="doing"?"Mark done ✓":"Reopen")+'</button>':"")+cmb+(rw?'<button data-a="more" data-id="'+t.id+'" aria-label="More actions">⋯</button>':"")+'</div></div>';
 }
 function vBoard(){
  var sg='<div class="seg" role="tablist" aria-label="Board view"><button data-bv="board" aria-pressed="'+(bview==="board")+'">Board</button><button data-bv="table" aria-pressed="'+(bview==="table")+'">Table</button></div>';
- return sg+(bview==="table"?vTable():vBoardCols());
+ var ur=ro()?"":'<div class="hgrp"><button class="hb" type="button" data-h="undo" aria-label="Undo" title="Undo (Ctrl+Z)"'+(HU.length?"":" disabled")+'><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg></button><button class="hb" type="button" data-h="redo" aria-label="Redo" title="Redo (Ctrl+Shift+Z)"'+(HR.length?"":" disabled")+'><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/></svg></button></div>';
+ return '<div class="hrow">'+sg+ur+"</div>"+(bview==="table"?vTable():vBoardCols());
 }
-function vBoardCols(){names(S.tasks.map(function(t){return t.by}));
+function vBoardCols(){names(tIds());
  var tk=VT().filter(function(t){return t.ty==="task"});
  var chips='<div class="stages" role="tablist">'+COLS.map(function(c){return '<button data-stage="'+c[0]+'" aria-pressed="'+(bcol===c[0])+'">'+c[1]+'<span class="cnt">'+tk.filter(function(t){return t.st===c[0]}).length+"</span></button>"}).join("")+"</div>";
  return chips+'<p class="hint">Tap a card’s main button to move it forward. Swipe a card right or left, or tap ⋯ for more. On a computer you can also drag cards. Priority rises on its own as deadlines get close.</p><div class="board">'+COLS.map(function(c){
@@ -371,7 +382,7 @@ function vToday(){
  var focus='<div class="panel"><h2>Do these next</h2>'+(top.length?top.map(function(t){var L=lvl(t);return '<div class="row l'+L.i+'"><div class="name">'+esc(t.n)+'<div class="meta"><span class="tag">'+LV[L.i]+"</span>"+left(t.dl)+'</div></div><button class="btn alt" data-a="go" data-id="'+t.id+'">'+(t.st==="todo"?"Start":"Finish")+"</button></div>"}).join(""):'<div class="empty">Nothing pending. Add a task above.</div>')+"</div>";
  var due=tk.filter(function(t){return t.st==="done"&&t.nextRev&&diff(t.nextRev)<=0});
  var rev='<div class="panel"><h2>Revise today ('+due.length+')</h2>'+(due.length?due.map(function(t){return '<div class="row l0"><div class="name">'+esc(t.n)+'<div class="meta"><span>Round '+(t.step+1)+" of "+INT.length+'</span></div></div><button class="btn" data-a="rev" data-id="'+t.id+'">Revised</button></div>'}).join(""):'<div class="empty">No revisions due. Finished tasks come back after 1, 3, 7, 14 and 30 days.</div>')+"</div>";
- var hab='<div class="panel"><h2>Daily habits <button class="btn alt" data-go="check" data-date="'+d+'" style="min-height:32px;float:right">Check-in</button></h2>'+(dl.length?dl.map(function(t){var on=!!(t.log&&t.log[d]);return '<div class="row l'+lvl(t).i+'"><button class="chk" aria-pressed="'+on+'" aria-label="Mark done today" data-a="hab" data-id="'+t.id+'">'+(on?"✓":"")+'</button><div class="name">'+esc(t.n)+habMeta(t,d)+'</div><button class="acts" style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-a="tm" data-id="'+t.id+'" aria-label="Set time and alarm">⏰</button><button class="acts" style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-a="del" data-id="'+t.id+'" aria-label="Delete habit">×</button></div>'}).join(""):'<div class="empty">No habits yet. Add one with type “Daily habit”.</div>')+"</div>";
+ var hab='<div class="panel"><h2>Daily habits <button class="btn alt" data-go="check" data-date="'+d+'" style="min-height:32px;float:right">Check-in</button></h2>'+(dl.length?dl.map(function(t){var on=!!(t.log&&t.log[d]);return '<div class="row l'+lvl(t).i+'"><button class="chk" aria-pressed="'+on+'" aria-label="Mark done today" data-a="hab" data-id="'+t.id+'">'+(on?"✓":"")+'</button><div class="name">'+esc(t.n)+habMeta(t,d)+'</div><button class="acts" style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-a="ed" data-id="'+t.id+'" aria-label="Edit habit">✏️</button><button class="acts" style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-a="tm" data-id="'+t.id+'" aria-label="Set time and alarm">⏰</button><button class="acts" style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-a="del" data-id="'+t.id+'" aria-label="Delete habit">×</button></div>'}).join(""):'<div class="empty">No habits yet. Add one with type “Daily habit”.</div>')+"</div>";
  var timed=VT().filter(function(t){return X(t).ts&&(t.ty==="task"?elig(t,d):t.ty==="daily"&&ap(t,d)&&(!t.own||t.own===ME))}).sort(function(a,b){return X(a).ts.localeCompare(X(b).ts)});
  var sched='<div class="panel"><h2>Today’s schedule</h2>'+(timed.length?timed.map(function(t){var dn=t.ty==="daily"&&t.log&&t.log[d]===1;return '<div class="row l'+lvl(t).i+'"><div class="name"><span class="tsub">'+esc(tmTxt(t))+'</span><br>'+esc(t.n)+(dn?" ✓":"")+'</div><button class="btn alt" data-a="tm" data-id="'+t.id+'" aria-label="Edit time and alarm">⏰</button></div>'}).join(""):'<div class="empty">No timed tasks today. Add a start time to a task to see your day here.</div>')+"</div>";
  return '<div class="grid2"><div>'+sched+prog+focus+'</div><div>'+rev+hab+"</div></div>";
@@ -475,6 +486,7 @@ function push(){
 function rebuild(){
  var old={},ML=(MY&&MY.logs)||{};S.tasks.forEach(function(t){old[t.id]=t});LAST={};
  S.tasks=tsnap.docs.map(function(d){var t=d.data();t.log=(old[t.id]&&old[t.id].log)||ML[t.id]||{};LAST[t.id]=JSON.stringify(shared(t));return t});
+ hbase();
 }
 function status(){var b=$("st"),n=Object.keys(MEM).length,a=$("fab");if(b)b.textContent=!live?"Solo":"Live · "+(RL[ROLE]||"Viewer")+" · "+Math.max(1,n)+(n>1?" members":" member");if(a)a.style.display=ro()?"none":""}
 function maybeCk(){if(ckAuto)return;ckAuto=true;if(habs().some(function(t){return ap(t,today())&&(t.log||{})[today()]===undefined}))ckOpen(today())}
@@ -675,6 +687,7 @@ V.addEventListener("click",function(e){
  if(a==="more"){asOpen(t.id);return}
  if(a==="tm"){asTime(t.id);return}
  if(ro()&&a!=="hab"){denied();return}
+ if(a==="ed"){asEdit(t.id);return}
  if(a==="del"){S.tasks=S.tasks.filter(function(x){return x.id!==t.id});if(live&&DB)CMT.filter(function(c){return c.tid===t.id}).forEach(function(c){DB.doc("comments/"+c.id).delete().catch(fail)});save();render()}
  else if(a==="m"){var k=COLS.map(function(c){return c[0]}),n=k[k.indexOf(t.st)+ +b.dataset.d];if(n)move(t,n)}
  else if(a==="go"){move(t,t.st==="todo"?"doing":"done")}
@@ -693,10 +706,12 @@ $("f").addEventListener("submit",function(e){
  if(te&&!ts){toast("Set a start time first");return}
  if(ts&&te&&te<=ts){toast("End time must be after the start time");return}
  var tm=$("tmL").hidden?"":$("tmSel").value;if(live&&hasTeams()&&!tm){toast("Pick a team first");return}
- S.tasks.push({id:id,n:n,dl:isT?($("dl").value||""):"",p:+$("pr").value,ty:isT?"task":"daily",fq:v==="weekly"?"w":"d",by:ME,byn:MEN,team:tm,tg:Math.min(7,Math.max(1,+$("tg").value||3)),st:"todo",step:0,log:{}});
+ var nt={id:id,n:n,dl:isT?($("dl").value||""):"",p:+$("pr").value,ty:isT?"task":"daily",fq:v==="weekly"?"w":"d",by:ME,byn:MEN,team:tm,tg:Math.min(7,Math.max(1,+$("tg").value||3)),st:"todo",step:0,log:{}};
+ if(isT&&live&&tm&&addAs.length)nt.as=addAs.slice();
+ S.tasks.push(nt);
  setX(id,{ed:isT?"":$("dl").value,od:isT?$("od").value:"",ts:ts,te:te,al:$("al").value});
  if(ts)askNotif();
- save();$("name").value="";$("dl").value="";$("od").value="";$("ts").value="";$("te").value="";$("al").value="0";tab=isT?"board":"today";$("addBox").hidden=true;render();
+ save();$("name").value="";$("dl").value="";$("od").value="";$("ts").value="";$("te").value="";$("al").value="0";addAs=[];fAs();tab=isT?"board":"today";$("addBox").hidden=true;render();
 });
 document.querySelector(".tabs").addEventListener("click",function(e){var b=e.target.closest("button[data-t]");if(b){tab=b.dataset.t;render()}});
 $("theme").addEventListener("click",function(){
@@ -799,7 +814,7 @@ function saveTime(t){
  if(ts&&te&&te<=ts){toast("End time must be after the start time");return}
  setX(t.id,{ed:$("xEd")?$("xEd").value:"",od:$("xOd")?$("xOd").value:"",ts:ts,te:te,al:$("xAl").value});
  if(ts)askNotif();
- AS.hidden=true;render();toast(ts?"Time and alarm saved":"Saved");
+ save();AS.hidden=true;render();toast(ts?"Time and alarm saved":"Saved");
 }
 /* alarm: default sound made with Web Audio, plus notification, vibration and a pop-up */
 var AC=null,alT=null,alQ=[],snz={},FK="study-planner-fired";
@@ -855,7 +870,7 @@ document.addEventListener("visibilitychange",function(){if(!document.hidden)almC
 
 /* add-task form: show only the fields that fit the chosen type */
 $("al").innerHTML=alOpts(0);
-function fUi(){var v=$("ty").value;$("dlT").textContent=v==="task"?"Deadline":"End date (last day, optional)";$("odL").hidden=v!=="task";$("tgL").hidden=v!=="weekly"}
+function fUi(){var v=$("ty").value;$("dlT").textContent=v==="task"?"Deadline":"End date (last day, optional)";$("odL").hidden=v!=="task";$("tgL").hidden=v!=="weekly";fAs()}
 $("ty").addEventListener("change",fUi);fUi();
 $("tstA").onclick=function(){audio();beep()};
 
@@ -880,7 +895,7 @@ function dlInfo(t){
 }
 function timeLine(t){var x=X(t);return x.ts?x.ts+(x.te?" – "+x.te:""):""}
 function vTable(){
- names(S.tasks.map(function(t){return t.by}));
+ names(tIds());
  var rows=tblRows(),showBy=live,showTeam=live&&curTeam===""&&Object.keys(TM).length>1;
  var chips='<div class="fchips" role="group" aria-label="Choose what to show and download">'+COLS.concat([["reg","Daily tasks"]]).map(function(c){
   var n=c[0]==="reg"?regList().length:VT().filter(function(t){return t.ty==="task"&&t.st===c[0]}).length;
@@ -889,7 +904,7 @@ function vTable(){
  var bar='<div class="tbar"><button class="btn" data-tbl="jpg" type="button">Download JPG</button>'+(navigator.share?'<button class="btn alt" data-tbl="share" type="button">Share</button>':"")+"</div>";
  var body=rows.length?rows.map(function(t,i){
   var L=lvl(t),si=stInfo(t),di=dlInfo(t),tl=timeLine(t);
-  return '<tr data-id="'+t.id+'"><td class="hm">'+(i+1)+'</td><td><span class="pri l'+L.i+'">'+LV[L.i]+'</span></td><td class="tn">'+esc(t.n)+(tl?'<div class="tsub">⏰ '+esc(tl)+"</div>":"")+'</td><td>'+esc(di[0])+(di[1]?'<div class="tsub">'+esc(di[1])+"</div>":"")+'</td><td><span class="stt '+si.cls+'">'+si.n+"</span></td>"+(showBy?'<td class="hm">'+esc(isReg(t)?"—":(byName(t)||"—"))+"</td>":"")+(showTeam?'<td class="hm">'+esc(teamName(t.team))+"</td>":"")+"</tr>";
+  return '<tr data-id="'+t.id+'"><td class="hm">'+(i+1)+'</td><td><span class="pri l'+L.i+'">'+LV[L.i]+'</span></td><td class="tn">'+esc(t.n)+(tl?'<div class="tsub">⏰ '+esc(tl)+"</div>":"")+(asNames(t).length?'<div class="tsub">👤 '+esc(asNames(t).join(", "))+"</div>":"")+'</td><td>'+esc(di[0])+(di[1]?'<div class="tsub">'+esc(di[1])+"</div>":"")+'</td><td><span class="stt '+si.cls+'">'+si.n+"</span></td>"+(showBy?'<td class="hm">'+esc(isReg(t)?"—":(byName(t)||"—"))+"</td>":"")+(showTeam?'<td class="hm">'+esc(teamName(t.team))+"</td>":"")+"</tr>";
  }).join(""):'<tr><td colspan="7" class="empty">Nothing selected, or nothing to show.</td></tr>';
  return '<p class="hint">Pick any mix of To do, In progress, Done and Daily tasks. The table and the JPG show exactly what is selected. Tap a row to change its status, time or alarm.</p>'+chips+bar+'<div class="tblwrap"><table class="tbl"><thead><tr><th class="hm">#</th><th>Priority</th><th>Task</th><th>Deadline</th><th>Status</th>'+(showBy?'<th class="hm">Added by</th>':"")+(showTeam?'<th class="hm">Team</th>':"")+'</tr></thead><tbody>'+body+"</tbody></table></div>";
 }
@@ -932,13 +947,13 @@ function tblDraw(){
  rows.forEach(function(t,i){
   if(i%2===1){c.fillStyle="#f6f8fd";c.fillRect(pad,y,tw,rowH)}
   c.fillStyle="#e1e5ef";c.fillRect(pad,y+rowH-1,tw,1);
-  var L=lvl(t),x=pad,cy=y+rowH/2,si=stInfo(t),di=dlInfo(t),tl=timeLine(t);
+  var L=lvl(t),x=pad,cy=y+rowH/2,si=stInfo(t),di=dlInfo(t),tl=timeLine(t),an=asNames(t).join(", "),sl=(tl?"Time "+tl:"")+(tl&&an?" · ":"")+(an?"Assigned: "+an:"");
   c.fillStyle="#667089";c.font="600 18px "+F;c.fillText(String(i+1),x+14,cy+6);x+=cols[0][1];
   var pt=LV[L.i];c.font="700 17px "+F;var pw=c.measureText(pt).width+26;
   c.lineWidth=2;c.strokeStyle=LC[L.i];rrect(c,x+8,cy-15,pw,30,15);c.stroke();c.fillStyle="#14213d";c.fillText(pt,x+21,cy+6);x+=cols[1][1];
   c.fillStyle="#14213d";c.font="700 20px "+F;
-  var ln=wrapTxt(c,t.n,cols[2][1]-24,tl?1:2);
-  if(tl){c.fillText(ln[0],x+14,cy-4);c.fillStyle="#667089";c.font="500 15px "+F;c.fillText("Time "+tl,x+14,cy+22)}
+  var ln=wrapTxt(c,t.n,cols[2][1]-24,sl?1:2);
+  if(sl){c.fillText(ln[0],x+14,cy-4);c.fillStyle="#667089";c.font="500 15px "+F;c.fillText(wrapTxt(c,sl,cols[2][1]-24,1)[0],x+14,cy+22)}
   else if(ln.length===1)c.fillText(ln[0],x+14,cy+7);else{c.fillText(ln[0],x+14,cy-4);c.fillText(ln[1],x+14,cy+22)}
   x+=cols[2][1];
   c.fillStyle="#14213d";c.font="600 18px "+F;c.fillText(wrapTxt(c,di[0],cols[3][1]-24,1)[0],x+14,di[1]?cy-3:cy+6);
@@ -969,6 +984,102 @@ function tblExport(share){
  try{(document.fonts&&document.fonts.load?document.fonts.load('700 20px "Bricolage Grotesque"'):Promise.resolve()).then(go,go)}catch(e){go()}
 }
 
+/* ---- assignees, edit sheet, undo / redo ---- */
+function tIds(){var a=[];S.tasks.forEach(function(t){a.push(t.by);(t.as||[]).forEach(function(k){a.push(k)})});return a}
+function pn(tid,k){if(k===ME)return"You";var g=(PG[tid]||{})[k];return(g&&g.name)||NM[k]||"Student"}
+function asNames(t){return(t.as||[]).map(function(k){return pn(t.team||"",k)})}
+function asTag(t){var a=asNames(t);if(!a.length)return"";var s=a.length>2?a.slice(0,2).join(", ")+" +"+(a.length-2):a.join(", ");return'<span class="tag">👤 '+esc(s)+"</span>"}
+function teamMembers(tid){
+ var o={};if(tid&&PG[tid])Object.keys(PG[tid]).forEach(function(k){o[k]=1});
+ if(tid&&(ROLE==="owner"||MYT.indexOf(tid)>=0))o[ME]=1;
+ return Object.keys(o).sort(function(a,b){return a===ME?-1:b===ME?1:pn(tid,a).localeCompare(pn(tid,b))});
+}
+function chipHtml(attr,tid,ids,sel){return ids.map(function(k){var on=sel.indexOf(k)>=0;return'<button type="button" data-'+attr+'="'+esc(k)+'" aria-pressed="'+on+'">'+(on?"✓ ":"")+esc(pn(tid,k))+"</button>"}).join("")}
+function fAs(){
+ var L=$("asL"),C=$("asChips");if(!L||!C)return;
+ var tid=$("tmL").hidden?"":$("tmSel").value;
+ if(!live||$("ty").value!=="task"||!tid){L.hidden=true;addAs=[];return}
+ var ids=teamMembers(tid);names(ids);
+ addAs=addAs.filter(function(k){return ids.indexOf(k)>=0});
+ if(!ids.length){L.hidden=true;return}
+ L.hidden=false;C.innerHTML=chipHtml("an",tid,ids,addAs);
+}
+$("asChips").addEventListener("click",function(e){var b=e.target.closest("button[data-an]");if(!b)return;var i=addAs.indexOf(b.dataset.an);if(i<0)addAs.push(b.dataset.an);else addAs.splice(i,1);fAs()});
+$("tmSel").addEventListener("change",function(){addAs=[];fAs()});
+
+function edInit(t){edAs=(t.as||[]).slice()}
+function asEdit(id){var t=find(id);if(!t)return;asT=id;edInit(t);asMode="edit";asDraw();AS.hidden=false}
+function asnBlock(t){
+ if(!live)return"";
+ var tid=t.team||"";
+ if(!tid)return'<p class="hint">Put this task in a team to assign it to members.</p>';
+ var ids=teamMembers(tid);(t.as||[]).forEach(function(k){if(ids.indexOf(k)<0)ids.push(k)});
+ if(!ids.length)return"";
+ names(ids);
+ return'<div><p class="hint" style="margin:0 0 6px">Assign to (pick one or more)</p><div class="fchips" style="margin:0">'+chipHtml("asn",tid,ids,edAs)+"</div></div>";
+}
+function editDraw(t){
+ var x=X(t),one=t.ty==="task",day=t.fq==="o",pr=t.p===undefined?1:t.p;
+ $("asb").innerHTML='<h2>Edit '+(one?"task":"habit")+'</h2><div class="stk">'
+  +'<label>Name<input id="eN" maxlength="80" value="'+esc(t.n)+'"></label>'
+  +'<label>Priority<select id="ePr">'+[["0","High"],["1","Medium"],["2","Low"]].map(function(o){return'<option value="'+o[0]+'"'+(+o[0]===pr?" selected":"")+">"+o[1]+"</option>"}).join("")+'</select></label>'
+  +(one?'<label>Deadline<input id="eDl" type="date" value="'+(t.dl||"")+'"></label><label>Do it on (optional)<input id="eOd" type="date" value="'+(x.od||"")+'"></label>':day?'<label>Day<input id="eOd" type="date" value="'+(t.od||"")+'"></label>':'<label>End date (last day, optional)<input id="eDl" type="date" value="'+(x.ed||"")+'"></label>')
+  +(t.fq==="w"?'<label>Times per week<input id="eTg" type="number" min="1" max="7" value="'+(t.tg||3)+'"></label>':"")
+  +'<label>Start time<input id="eTs" type="time" value="'+(x.ts||"")+'"></label><label>End time<input id="eTe" type="time" value="'+(x.te||"")+'"></label><label>Alarm<select id="eAl">'+alOpts(x.al||0)+'</select></label>'
+  +(one?asnBlock(t):"")
+  +'<button class="btn" data-ac="esave">Save changes</button><button class="btn alt" data-ac="x">Cancel</button></div>';
+}
+function saveEdit(t){
+ var n=$("eN").value.trim();if(!n){toast("Enter a name");return}
+ var ts=$("eTs").value,te=$("eTe").value;
+ if(te&&!ts){toast("Set a start time first");return}
+ if(ts&&te&&te<=ts){toast("End time must be after the start time");return}
+ var one=t.ty==="task",day=t.fq==="o";
+ t.n=n;t.p=+$("ePr").value;
+ if(one)t.dl=$("eDl").value||"";
+ if(day&&$("eOd").value)t.od=$("eOd").value;
+ if($("eTg"))t.tg=Math.min(7,Math.max(1,+$("eTg").value||3));
+ if(one&&live){if(edAs.length)t.as=edAs.slice();else delete t.as}
+ setX(t.id,{ed:(!one&&!day)?$("eDl").value:"",od:one?$("eOd").value:"",ts:ts,te:te,al:$("eAl").value});
+ if(ts)askNotif();
+ save();AS.hidden=true;render();toast("Saved");
+}
+
+/* undo / redo: each step remembers only the tasks it changed, so undoing never rolls back other people's edits to other tasks */
+function hmap(){var m={};S.tasks.forEach(function(t){m[t.id]=JSON.stringify([shared(t),X0[t.id]||null])});return m}
+function hbase(){HC=hmap()}
+function hbtn(){document.querySelectorAll("button[data-h]").forEach(function(b){b.disabled=!(b.dataset.h==="undo"?HU.length:HR.length)})}
+function hrec(){
+ var n=hmap();if(!HC){HC=n;return}
+ var b={},a={},any=false,k;
+ for(k in n)if(HC[k]!==n[k]){b[k]=HC[k]||null;a[k]=n[k];any=true}
+ for(k in HC)if(!(k in n)){b[k]=HC[k];a[k]=null;any=true}
+ HC=n;
+ if(any){HU.push({b:b,a:a});if(HU.length>50)HU.shift();HR=[]}
+ hbtn();
+}
+function happly(map){
+ HAP=true;
+ Object.keys(map).forEach(function(k){
+  var v=map[k],id=+k;
+  if(v===null){S.tasks=S.tasks.filter(function(t){return t.id!==id});delete X0[k];return}
+  var p=JSON.parse(v),t=p[0],x=p[1],old=find(id);
+  t.id=id;t.log=old?old.log:{};
+  if(old)S.tasks[S.tasks.indexOf(old)]=t;else S.tasks.push(t);
+  if(x)X0[k]=x;else delete X0[k];
+ });
+ saveX();save();HAP=false;hbase();hbtn();render();
+}
+function undo(){if(ro())return;var e=HU.pop();if(!e){toast("Nothing to undo");return}HR.push(e);happly(e.b);toast("Undone")}
+function redo(){if(ro())return;var e=HR.pop();if(!e){toast("Nothing to redo");return}HU.push(e);happly(e.a);toast("Redone")}
+V.addEventListener("click",function(e){var h=e.target.closest("button[data-h]");if(!h||h.disabled)return;if(h.dataset.h==="undo")undo();else redo()});
+document.addEventListener("keydown",function(e){
+ if(!(e.ctrlKey||e.metaKey)||e.altKey)return;
+ var tg=e.target&&e.target.tagName;if(/^(INPUT|TEXTAREA|SELECT)$/.test(tg||"")||(e.target&&e.target.isContentEditable))return;
+ var k=(e.key||"").toLowerCase();
+ if(k==="z"&&!e.shiftKey){e.preventDefault();undo()}else if(k==="y"||(k==="z"&&e.shiftKey)){e.preventDefault();redo()}
+});
+
 /* modern interactions: action sheet, swipe, toast, stage chips */
 var toastT=null;
 function toast(m){var e=$("toast");if(!e){e=document.createElement("div");e.id="toast";e.className="toast";e.setAttribute("role","status");document.body.appendChild(e)}e.textContent=m;e.hidden=false;clearTimeout(toastT);toastT=setTimeout(function(){e.hidden=true},2200)}
@@ -978,17 +1089,21 @@ function asOpen(id){asT=id;asMode="";asDraw();AS.hidden=false}
 function asDraw(){
  var t=find(asT);if(!t){AS.hidden=true;return}
  if(asMode==="time"){timeDraw(t);return}
+ if(asMode==="edit"){editDraw(t);return}
  var rw=!ro();
- $("asb").innerHTML='<h2>'+esc(t.n)+'</h2>'+(rw?'<p class="hint">Move to</p><div class="stk">'+COLS.map(function(c){var cur=t.st===c[0];return '<button class="btn'+(cur?"":" alt")+'" data-st="'+c[0]+'"'+(cur?' aria-current="true"':"")+'>'+c[1]+(cur?" (current)":"")+'</button>'}).join("")+'</div>':'')+(ROLE==="owner"&&live&&hasTeams()?'<p class="hint" style="margin-top:12px">Move to team</p><div class="stk">'+myTeamIds().concat([""]).map(function(id){var cur=(t.team||"")===id;return'<button class="btn'+(cur?"":" alt")+'" data-mt="'+esc(id)+'">'+esc(teamName(id))+(cur?" (current)":"")+"</button>"}).join("")+"</div>":"")+'<button class="btn alt" data-ac="tm" style="width:100%;margin-top:10px">⏰ Time &amp; alarm</button>'+(live?'<button class="btn alt" data-ac="cm" style="width:100%;margin-top:10px">💬 Comments ('+cmCount(t.id)+')</button>':'')+(rw?'<button class="btn alt" data-ac="del" style="width:100%;margin-top:10px;color:var(--l3)">Delete task</button>':'')+'<button class="btn alt" data-ac="x" style="width:100%;margin-top:10px">Close</button>';
+ $("asb").innerHTML='<h2>'+esc(t.n)+'</h2>'+(rw?'<button class="btn" data-ac="ed" style="width:100%;margin:2px 0 10px">✏️ Edit task</button>':'')+(rw?'<p class="hint">Move to</p><div class="stk">'+COLS.map(function(c){var cur=t.st===c[0];return '<button class="btn'+(cur?"":" alt")+'" data-st="'+c[0]+'"'+(cur?' aria-current="true"':"")+'>'+c[1]+(cur?" (current)":"")+'</button>'}).join("")+'</div>':'')+(ROLE==="owner"&&live&&hasTeams()?'<p class="hint" style="margin-top:12px">Move to team</p><div class="stk">'+myTeamIds().concat([""]).map(function(id){var cur=(t.team||"")===id;return'<button class="btn'+(cur?"":" alt")+'" data-mt="'+esc(id)+'">'+esc(teamName(id))+(cur?" (current)":"")+"</button>"}).join("")+"</div>":"")+'<button class="btn alt" data-ac="tm" style="width:100%;margin-top:10px">⏰ Time &amp; alarm</button>'+(live?'<button class="btn alt" data-ac="cm" style="width:100%;margin-top:10px">💬 Comments ('+cmCount(t.id)+')</button>':'')+(rw?'<button class="btn alt" data-ac="del" style="width:100%;margin-top:10px;color:var(--l3)">Delete task</button>':'')+'<button class="btn alt" data-ac="x" style="width:100%;margin-top:10px">Close</button>';
 }
 AS.addEventListener("click",function(e){
  if(e.target===AS){AS.hidden=true;return}
  var b=e.target.closest("button");if(!b)return;var t=find(asT);if(!t)return;
+ if(b.dataset.asn!==undefined){var ai=edAs.indexOf(b.dataset.asn);if(ai<0)edAs.push(b.dataset.asn);else edAs.splice(ai,1);var on=ai<0;b.setAttribute("aria-pressed",on);b.textContent=(on?"✓ ":"")+pn(t.team||"",b.dataset.asn);return}
  if(b.dataset.st){if(ro()){denied();return}AS.hidden=true;move(t,b.dataset.st);return}
  if(b.dataset.mt!==undefined&&ROLE==="owner"){AS.hidden=true;t.team=b.dataset.mt;save();render();toast("Moved to "+teamName(t.team));return}
  var a=b.dataset.ac;
  if(a==="x")AS.hidden=true;
  else if(a==="tm"){asMode="time";asDraw()}
+ else if(a==="ed"){if(ro()){denied();return}edInit(t);asMode="edit";asDraw()}
+ else if(a==="esave"){if(ro()){denied();return}saveEdit(t)}
  else if(a==="test"){audio();beep()}
  else if(a==="tsave"){saveTime(t)}
  else if(a==="cm"){AS.hidden=true;cmOpen(t.id)}
@@ -1012,7 +1127,7 @@ V.addEventListener("touchend",function(e){
  var tk=find(id);if(!tk)return;
  var k=COLS.map(function(x){return x[0]}),n=k[k.indexOf(tk.st)+(dx>0?1:-1)];if(n)move(tk,n);
 });
-$("fab").onclick=function(){fillTeamSel();$("addBox").hidden=false;setTimeout(function(){$("name").focus()},50)};
+$("fab").onclick=function(){fillTeamSel();fAs();$("addBox").hidden=false;setTimeout(function(){$("name").focus()},50)};
 $("addX").onclick=function(){$("addBox").hidden=true};
 $("addBox").addEventListener("click",function(e){if(e.target===this)this.hidden=true});
 document.addEventListener("keydown",function(e){if(e.key==="Escape"){if(!AS.hidden)AS.hidden=true;if(!$("addBox").hidden)$("addBox").hidden=true}});
@@ -1045,7 +1160,7 @@ $("impf").onchange=function(){
  };
  r.readAsText(f);
 };
-load();loadX();render();start();almCheck();
+load();loadX();hbase();hbtn();render();start();almCheck();
 })();
 </script>
 </body>
