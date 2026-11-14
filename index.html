@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Study Planner</title>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
 :root{--bg:#f4f6fb;--surface:#fff;--ink:#14213d;--mute:#667089;--line:#e1e5ef;--acc:#3b5bff;--acc-ink:#fff;--l3:#e5484d;--l2:#d98a00;--l1:#3b5bff;--l0:#2f9467;--chip:#eaeefc;
 color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -87,7 +90,7 @@ input,select{background:var(--bg);border:1px solid var(--line);border-radius:10p
 <main>
 <header>
 <div><h1>Study Planner</h1><p class="date" id="date"></p></div>
-<div style="display:flex;gap:8px;align-items:center"><button class="tag" id="st" style="border:0;cursor:pointer;font:inherit;font-size:.8rem;padding:6px 10px;color:var(--ink)" aria-label="Open team tab">Solo</button><button class="icon" id="theme" aria-label="Toggle theme">◐</button></div>
+<div style="display:flex;gap:8px;align-items:center"><button class="tag" id="st" style="border:0;cursor:pointer;font:inherit;font-size:.8rem;padding:6px 10px;color:var(--ink)" aria-label="Open team tab">Solo</button><button class="tag" id="auth" style="border:0;cursor:pointer;font:inherit;font-size:.8rem;padding:6px 10px;color:var(--ink)">Sign in</button><button class="icon" id="theme" aria-label="Toggle theme">◐</button></div>
 </header>
 
 <section class="hero" aria-live="polite">
@@ -113,6 +116,57 @@ input,select{background:var(--bg);border:1px solid var(--line);border-radius:10p
 <div id="view"></div>
 </main>
 <div class="ov" id="ck" hidden role="dialog" aria-modal="true" aria-label="Daily check-in"><div class="sheet" id="ckb"></div></div>
+
+<!-- Firebase adapter: replaces the old window.claude cloud sync -->
+<script>
+firebase.initializeApp({
+  apiKey:"PASTE_YOUR_WEB_API_KEY",
+  authDomain:"study-planner-89895.firebaseapp.com",
+  projectId:"study-planner-89895",
+  storageBucket:"study-planner-89895.firebasestorage.app",
+  messagingSenderId:"348155460980",
+  appId:"1:348155460980:web:8c5215087556a9dad80021"
+});
+var auth=firebase.auth(), fs=firebase.firestore();
+var authed=new Promise(function(res){
+  var off=auth.onAuthStateChanged(function(u){off();res(u)});
+});
+authed.then(function(u){
+  var b=document.getElementById("auth");
+  b.textContent=u?"Sign out":"Sign in with Google";
+  b.onclick=function(){
+    (u?auth.signOut():auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()))
+      .then(function(){location.reload()}).catch(function(e){alert("Sign-in problem: "+(e&&e.message||e))});
+  };
+});
+window.claude={use:function(n){
+  return authed.then(function(u){
+    if(!u)return null;
+    if(n==="db")return{
+      collection:function(c){return fs.collection(c)},
+      doc:function(p){
+        var r=fs.doc(p);
+        if(p.indexOf("members/")===0){
+          var s=r.set.bind(r);
+          r.set=function(d){d.name=u.displayName||"Student";return s(d)};
+        }
+        return r;
+      }
+    };
+    if(n==="user")return{
+      id:function(){return Promise.resolve(u.uid)},
+      isOwner:function(){return Promise.resolve(true)},
+      can:function(){return Promise.resolve(true)},
+      profiles:function(ids){
+        return Promise.all(ids.map(function(i){return fs.doc("members/"+i).get()})).then(function(sn){
+          var o={};sn.forEach(function(s){if(s.exists&&s.data().name)o[s.id]={name:s.data().name}});return o;
+        });
+      }
+    };
+    return null;
+  });
+}};
+</script>
 
 <script>
 (function(){
@@ -251,11 +305,11 @@ function vGraphs(){
 }
 V_go();
 function V_go(){document.getElementById("view").addEventListener("click",function(e){var g=e.target.closest("[data-go]");if(!g)return;var k=g.dataset.go;if(k==="check"){ckOpen(g.dataset.date);return}tab=k;render();flash(g.dataset.id,g.dataset.col)})}
-/* shared plan: live sync through the db capability */
+/* shared plan: live sync through Firebase (via the adapter above) */
 var ME="me",DB=null,USR=null,OWN=false,NM={},MEM={},LAST={},LASTM="",live=false,ready=false,canW=true,gotT=false,gotM=false,hyd=false,tsnap=null,ckAuto=false;
 function shared(t){var o={};for(var k in t)if(k!=="log")o[k]=t[k];return o}
 function mine(){var lg={};S.tasks.forEach(function(t){if(t.ty==="daily"&&t.log&&Object.keys(t.log).length)lg[t.id]=t.log});return{logs:lg,act:S.act,focus:S.focus}}
-function fail(e){if(e&&e.code==="invalid_argument"){canW=false;status()}}
+function fail(e){if(e&&(e.code==="invalid_argument"||e.code==="permission-denied")){canW=false;status()}}
 function push(){
  if(!DB||!ready||!canW)return;
  var ids={};
@@ -285,11 +339,11 @@ function names(ids){
 function nm(i){return i===ME?"You":NM[i]||"Student"}
 function stk(a){var d=today(),n=0;if(!a[d])d=addDays(d,-1);while(a[d]){n++;d=addDays(d,-1)}return n}
 function vTeam(){
- if(!live)return '<div class="panel"><h2>Team</h2><p class="hint">Live sync is off in this view. Open the shared link while signed in to plan with other students.</p></div>';
+ if(!live)return '<div class="panel"><h2>Team</h2><p class="hint">Live sync is off. Tap “Sign in with Google” at the top to plan with other students.</p></div>';
  var d=today(),ids=Object.keys(MEM);if(ids.indexOf(ME)<0)ids.unshift(ME);
  names(ids.concat(S.tasks.map(function(t){return t.by})));
  var tk=S.tasks.filter(function(t){return t.ty==="task"}),dn=tk.filter(function(t){return t.st==="done"}).length,hb=S.tasks.filter(function(t){return t.ty==="daily"&&t.fq!=="w"&&t.fq!=="o"});
- var head='<div class="panel"><h2>Team plan</h2><p class="hint">Everyone with this link edits the same board live. Habit check-ins stay personal, and the team sees your progress.'+(canW?"":" You have read-only access, so ask the owner for Contributor access to edit.")+'</p><button class="run" data-go="board" data-col="done"><div class="srow"><span>Team tasks finished</span><span>'+dn+" of "+tk.length+'</span></div><div class="rb" style="--c:var(--l0)"><i style="width:'+(tk.length?Math.round(dn/tk.length*100):0)+'%"></i></div></button></div>';
+ var head='<div class="panel"><h2>Team plan</h2><p class="hint">Everyone who signs in edits the same board live. Habit check-ins stay personal, and the team sees your progress.'+(canW?"":" You have read-only access, so ask the owner to update the sharing rules.")+'</p><button class="run" data-go="board" data-col="done"><div class="srow"><span>Team tasks finished</span><span>'+dn+" of "+tk.length+'</span></div><div class="rb" style="--c:var(--l0)"><i style="width:'+(tk.length?Math.round(dn/tk.length*100):0)+'%"></i></div></button></div>';
  var rows=ids.map(function(id){
   var m=id===ME?mine():MEM[id]||{},a=0,y=0,f7=0,x,j;
   for(j=0;j<30;j++){x=addDays(d,-j);hb.forEach(function(t){if(ap(t,x)){a++;if(m.logs&&m.logs[t.id]&&m.logs[t.id][x]===1)y++}})}
