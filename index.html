@@ -92,6 +92,7 @@ input,select{background:var(--bg);border:1px solid var(--line);border-radius:10p
 <div><h1>Study Planner</h1><p class="date" id="date"></p></div>
 <div style="display:flex;gap:8px;align-items:center"><button class="tag" id="st" style="border:0;cursor:pointer;font:inherit;font-size:.8rem;padding:6px 10px;color:var(--ink)" aria-label="Open team tab">Solo</button><button class="tag" id="auth" style="border:0;cursor:pointer;font:inherit;font-size:.8rem;padding:6px 10px;color:var(--ink)">Sign in</button><button class="icon" id="theme" aria-label="Toggle theme">◐</button></div>
 </header>
+<p class="hint" id="noacc" hidden style="color:var(--l3);font-weight:600;margin:10px 0 0"></p>
 
 <section class="hero" aria-live="polite">
 <div><b id="hPct">0%</b><span>Tasks finished</span></div>
@@ -108,6 +109,12 @@ input,select{background:var(--bg);border:1px solid var(--line);border-radius:10p
 <button class="btn full" type="submit">Add task</button>
 </form></details>
 
+<details id="dataBox" style="margin-top:10px"><summary>Backup: export / import data</summary>
+<p class="hint" style="margin-top:10px">Export saves everything (tasks, habits, check-ins, streak and focus minutes) to a .json file. Send that file to someone, and they can import it to get the same data.</p>
+<div class="center"><button class="btn" id="exp" type="button">Export data (.json)</button><button class="btn alt" id="imp" type="button">Import data…</button><input type="file" id="impf" accept=".json,application/json" hidden></div>
+<p class="hint" id="dmsg" role="status" style="margin:10px 0 0"></p>
+</details>
+
 <div class="tabs" role="tablist">
 <button role="tab" data-t="board">Board</button>
 <button role="tab" data-t="today">Today</button><button role="tab" data-t="graphs">Graphs</button><button role="tab" data-t="team">Team</button>
@@ -116,11 +123,12 @@ input,select{background:var(--bg);border:1px solid var(--line);border-radius:10p
 <div id="view"></div>
 </main>
 <div class="ov" id="ck" hidden role="dialog" aria-modal="true" aria-label="Daily check-in"><div class="sheet" id="ckb"></div></div>
+<div class="ov" id="cm" hidden role="dialog" aria-modal="true" aria-label="Comments"><div class="sheet" id="cmb"></div></div>
 
 <!-- Firebase adapter: replaces the old window.claude cloud sync -->
 <script>
 firebase.initializeApp({
-  apiKey:"PASTE_YOUR_WEB_API_KEY",
+  apiKey:"AIzaSyA_M0PTABZVvZhMlRze6Qbe3zxii6uQ04g",
   authDomain:"study-planner-89895.firebaseapp.com",
   projectId:"study-planner-89895",
   storageBucket:"study-planner-89895.firebasestorage.app",
@@ -128,22 +136,41 @@ firebase.initializeApp({
   appId:"1:348155460980:web:8c5215087556a9dad80021"
 });
 var auth=firebase.auth(), fs=firebase.firestore();
+var OWNER_EMAIL="jobexperience01@gmail.com";   /* the owner: change here AND in the Firestore rules */
 var authed=new Promise(function(res){
   var off=auth.onAuthStateChanged(function(u){off();res(u)});
 });
-authed.then(function(u){
-  var b=document.getElementById("auth");
+var roleP=authed.then(function(u){
+  if(!u)return null;
+  var em=(u.email||"").toLowerCase();
+  if(em===OWNER_EMAIL&&u.emailVerified)return "owner";
+  return fs.doc("access/"+em).get().then(function(s){return s.exists?s.data().role:null}).catch(function(){return null});
+});
+window.PLANNER={role:null,email:"",name:""};
+var ctx=Promise.all([authed,roleP]).then(function(r){
+  var u=r[0],role=r[1];
+  if(u)window.PLANNER={role:role,email:(u.email||"").toLowerCase(),name:u.displayName||u.email||"Student"};
+  return{u:u,role:role};
+});
+ctx.then(function(c){
+  var u=c.u,b=document.getElementById("auth");
   b.textContent=u?"Sign out":"Sign in with Google";
   b.onclick=function(){
     (u?auth.signOut():auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()))
       .then(function(){location.reload()}).catch(function(e){alert("Sign-in problem: "+(e&&e.message||e))});
   };
+  if(u&&!c.role){
+    var n=document.getElementById("noacc");
+    n.textContent="Signed in as "+u.email+", but this email is not on the access list yet. Ask the owner to add it. Until then you are using your own private copy on this device.";
+    n.hidden=false;
+  }
 });
 window.claude={use:function(n){
-  return authed.then(function(u){
-    if(!u)return null;
+  return ctx.then(function(c){
+    var u=c.u,role=c.role;
+    if(!u||!role)return null;
     if(n==="db")return{
-      collection:function(c){return fs.collection(c)},
+      collection:function(x){return fs.collection(x)},
       doc:function(p){
         var r=fs.doc(p);
         if(p.indexOf("members/")===0){
@@ -155,8 +182,8 @@ window.claude={use:function(n){
     };
     if(n==="user")return{
       id:function(){return Promise.resolve(u.uid)},
-      isOwner:function(){return Promise.resolve(true)},
-      can:function(){return Promise.resolve(true)},
+      isOwner:function(){return Promise.resolve(role==="owner")},
+      can:function(){return Promise.resolve(role==="owner"||role==="editor")},
       profiles:function(ids){
         return Promise.all(ids.map(function(i){return fs.doc("members/"+i).get()})).then(function(sn){
           var o={};sn.forEach(function(s){if(s.exists&&s.data().name)o[s.id]={name:s.data().name}});return o;
@@ -206,9 +233,9 @@ function find(id){return S.tasks.filter(function(x){return x.id===+id})[0]}
 function streak(){var d=today(),n=0;if(!S.act[d])d=addDays(d,-1);while(S.act[d]){n++;d=addDays(d,-1)}return n}
 
 function card(t){
- var L=lvl(t),i=COLS.map(function(c){return c[0]}).indexOf(t.st),rev="";
+ var L=lvl(t),i=COLS.map(function(c){return c[0]}).indexOf(t.st),rev="",rw=!ro(),cmb=live?'<button data-a="cm" data-id="'+t.id+'" aria-label="Comments">💬 '+cmCount(t.id)+"</button>":"";
  if(t.st==="done"){rev=t.nextRev?(diff(t.nextRev)<=0?'<span class="late">Revise today</span>':"<span>Revise in "+diff(t.nextRev)+"d</span>"):"<span>Mastered ✓</span>"}
- return '<div class="card l'+L.i+'" draggable="true" data-id="'+t.id+'"><div class="name">'+esc(t.n)+'</div><div class="meta"><span class="tag">'+LV[L.i]+"</span>"+(L.up?'<span class="tag up">↑ from '+L.from+"</span>":"")+(t.st==="done"?rev:left(t.dl))+(t.by&&t.by!==ME&&NM[t.by]?"<span>by "+esc(NM[t.by])+"</span>":"")+'</div><div class="acts"><button data-a="m" data-d="-1" data-id="'+t.id+'" aria-label="Move left"'+(i===0?" disabled":"")+'>‹</button><button data-a="m" data-d="1" data-id="'+t.id+'" aria-label="Move right"'+(i===2?" disabled":"")+'>›</button><span class="sp"></span><button data-a="del" data-id="'+t.id+'" aria-label="Delete task">×</button></div></div>';
+ return '<div class="card l'+L.i+'" draggable="'+rw+'" data-id="'+t.id+'"><div class="name">'+esc(t.n)+'</div><div class="meta"><span class="tag">'+LV[L.i]+"</span>"+(L.up?'<span class="tag up">↑ from '+L.from+"</span>":"")+(t.st==="done"?rev:left(t.dl))+(t.by&&t.by!==ME&&NM[t.by]?"<span>by "+esc(NM[t.by])+"</span>":"")+'</div><div class="acts">'+(rw?'<button data-a="m" data-d="-1" data-id="'+t.id+'" aria-label="Move left"'+(i===0?" disabled":"")+'>‹</button><button data-a="m" data-d="1" data-id="'+t.id+'" aria-label="Move right"'+(i===2?" disabled":"")+'>›</button>':"")+'<span class="sp"></span>'+cmb+(rw?'<button data-a="del" data-id="'+t.id+'" aria-label="Delete task">×</button>':"")+'</div></div>';
 }
 function vBoard(){names(S.tasks.map(function(t){return t.by}));
  var tk=S.tasks.filter(function(t){return t.ty==="task"});
@@ -247,7 +274,8 @@ function stats(){
  $("hStreak").textContent=streak();
  $("hFocus").textContent=S.focus[today()]||0;
 }
-function render(){
+function render(soft){
+ var ae=document.activeElement;if(soft&&tab==="team"&&ae&&/^(INPUT|SELECT)$/.test(ae.tagName)&&ae.closest&&ae.closest("#view"))return;
  document.querySelectorAll(".tabs button").forEach(function(b){b.setAttribute("aria-selected",b.dataset.t===tab)});
  $("view").innerHTML=tab==="board"?vBoard():tab==="today"?vToday():tab==="graphs"?vGraphs():tab==="team"?vTeam():vTimer();
  if(tab==="timer")tEvents();
@@ -266,7 +294,7 @@ var ckD=today();
 function ckOpen(d){ckD=d||today();ckDraw();$("ck").hidden=false}
 function ckDraw(){
  var d=ckD,y=addDays(today(),-1),list=habs().filter(function(t){return ap(t,d)});
- $("ckb").innerHTML='<h2>Daily check-in</h2><div class="center" style="margin-bottom:8px"><button class="btn'+(d===y?"":" alt")+'" data-d="'+y+'">Yesterday</button><button class="btn'+(d===today()?"":" alt")+'" data-d="'+today()+'">Today</button></div><p class="hint">'+(d===today()||d===y?"":d+" · ")+'Did you finish these?</p>'+(list.length?list.map(function(t){var v=t.log&&t.log[d];return '<div class="row l'+lvl(t).i+'"><div class="name">'+esc(t.n)+'<div class="meta"><span>'+(t.fq==="w"?wc(t,wk(d))+" of "+t.tg+" this week":t.fq==="o"?"This day only":"Every day")+'</span></div></div><div class="yn" data-id="'+t.id+'"><button class="y'+(v===1?" on":"")+'" data-v="1">Yes</button><button class="n'+(v===0?" on":"")+'" data-v="0">No</button></div></div>'}).join(""):'<div class="empty">Nothing to check yet. Add a daily or weekly habit.</div>')+'<form id="ckf" style="grid-template-columns:1fr auto"><input id="cki" maxlength="80" placeholder="Add something for this day only" aria-label="Add a task for this day"><button class="btn" type="submit">Add</button></form><button class="btn" id="ckx" style="width:100%;margin-top:12px">Done</button>';
+ $("ckb").innerHTML='<h2>Daily check-in</h2><div class="center" style="margin-bottom:8px"><button class="btn'+(d===y?"":" alt")+'" data-d="'+y+'">Yesterday</button><button class="btn'+(d===today()?"":" alt")+'" data-d="'+today()+'">Today</button></div><p class="hint">'+(d===today()||d===y?"":d+" · ")+'Did you finish these?</p>'+(list.length?list.map(function(t){var v=t.log&&t.log[d];return '<div class="row l'+lvl(t).i+'"><div class="name">'+esc(t.n)+'<div class="meta"><span>'+(t.fq==="w"?wc(t,wk(d))+" of "+t.tg+" this week":t.fq==="o"?"This day only":"Every day")+'</span></div></div><div class="yn" data-id="'+t.id+'"><button class="y'+(v===1?" on":"")+'" data-v="1">Yes</button><button class="n'+(v===0?" on":"")+'" data-v="0">No</button></div></div>'}).join(""):'<div class="empty">Nothing to check yet. Add a daily or weekly habit.</div>')+(ro()?'':'<form id="ckf" style="grid-template-columns:1fr auto"><input id="cki" maxlength="80" placeholder="Add something for this day only" aria-label="Add a task for this day"><button class="btn" type="submit">Add</button></form>')+'<button class="btn" id="ckx" style="width:100%;margin-top:12px">Done</button>';
 }
 var CK=$("ck");
 CK.addEventListener("click",function(e){
@@ -275,7 +303,7 @@ CK.addEventListener("click",function(e){
  if(b.dataset.d){ckD=b.dataset.d;ckDraw();return}
  if(b.dataset.v!==undefined){var t=find(b.parentNode.dataset.id),v=+b.dataset.v;if(!t)return;t.log=t.log||{};if(t.log[ckD]===v)delete t.log[ckD];else{t.log[ckD]=v;if(v===1)mark()}save();ckDraw();stats()}
 });
-CK.addEventListener("submit",function(e){e.preventDefault();var n=$("cki").value.trim();if(!n)return;S.tasks.push({id:Date.now(),n:n,ty:"daily",fq:"o",od:ckD,own:ME,p:1,st:"todo",step:0,log:{}});save();ckDraw()});
+CK.addEventListener("submit",function(e){e.preventDefault();var n=$("cki").value.trim();if(!n||ro())return;S.tasks.push({id:Date.now(),n:n,ty:"daily",fq:"o",od:ckD,own:ME,p:1,st:"todo",step:0,log:{}});save();ckDraw()});
 document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!CK.hidden){CK.hidden=true;render()}});
 
 /* graphs: every bar, slice and badge jumps somewhere */
@@ -306,22 +334,27 @@ function vGraphs(){
 V_go();
 function V_go(){document.getElementById("view").addEventListener("click",function(e){var g=e.target.closest("[data-go]");if(!g)return;var k=g.dataset.go;if(k==="check"){ckOpen(g.dataset.date);return}tab=k;render();flash(g.dataset.id,g.dataset.col)})}
 /* shared plan: live sync through Firebase (via the adapter above) */
-var ME="me",DB=null,USR=null,OWN=false,NM={},MEM={},LAST={},LASTM="",live=false,ready=false,canW=true,gotT=false,gotM=false,hyd=false,tsnap=null,ckAuto=false;
+var RL={owner:"Owner",editor:"Editor",commenter:"Commenter",viewer:"Viewer"},ROLE="",EML="",MEN="Student",canC=false,ACC={},CMT=[],cmT=null,ME="me",DB=null,USR=null,OWN=false,NM={},MEM={},LAST={},LASTM="",live=false,ready=false,canW=true,gotT=false,gotM=false,hyd=false,tsnap=null,ckAuto=false;
 function shared(t){var o={};for(var k in t)if(k!=="log")o[k]=t[k];return o}
 function mine(){var lg={};S.tasks.forEach(function(t){if(t.ty==="daily"&&t.log&&Object.keys(t.log).length)lg[t.id]=t.log});return{logs:lg,act:S.act,focus:S.focus}}
-function fail(e){if(e&&(e.code==="invalid_argument"||e.code==="permission-denied")){canW=false;status()}}
+function fail(e){}
+function failT(e){if(e&&(e.code==="invalid_argument"||e.code==="permission-denied")){canW=false;status();render(true)}}
+function ro(){return live&&!canW}
+function denied(){alert("Your role ("+(RL[ROLE]||"Viewer")+") cannot change the shared board.")}
 function push(){
- if(!DB||!ready||!canW)return;
+ if(!DB||!ready)return;
+ if(canW){
  var ids={};
- S.tasks.forEach(function(t){ids[t.id]=1;var j=JSON.stringify(shared(t));if(LAST[t.id]!==j){LAST[t.id]=j;DB.doc("tasks/"+t.id).set(shared(t)).catch(fail)}});
- Object.keys(LAST).forEach(function(id){if(!ids[id]){delete LAST[id];DB.doc("tasks/"+id).delete().catch(fail)}});
+ S.tasks.forEach(function(t){ids[t.id]=1;var j=JSON.stringify(shared(t));if(LAST[t.id]!==j){LAST[t.id]=j;DB.doc("tasks/"+t.id).set(shared(t)).catch(failT)}});
+ Object.keys(LAST).forEach(function(id){if(!ids[id]){delete LAST[id];DB.doc("tasks/"+id).delete().catch(failT)}});
+ }
  var m=JSON.stringify(mine());if(m!==LASTM){LASTM=m;DB.doc("members/"+ME).set(JSON.parse(m)).catch(fail)}
 }
 function rebuild(){
  var old={},ML=(MEM[ME]&&MEM[ME].logs)||{};S.tasks.forEach(function(t){old[t.id]=t});LAST={};
  S.tasks=tsnap.docs.map(function(d){var t=d.data();t.log=(old[t.id]&&old[t.id].log)||ML[t.id]||{};LAST[t.id]=JSON.stringify(shared(t));return t});
 }
-function status(){var b=$("st"),n=Object.keys(MEM).length;if(b)b.textContent=!live?"Solo":!canW?"Read only":"Live · "+Math.max(1,n)+(n>1?" members":" member")}
+function status(){var b=$("st"),n=Object.keys(MEM).length,a=$("addBox");if(b)b.textContent=!live?"Solo":"Live · "+(RL[ROLE]||"Viewer")+" · "+Math.max(1,n)+(n>1?" members":" member");if(a)a.style.display=ro()?"none":""}
 function maybeCk(){if(ckAuto)return;ckAuto=true;if(habs().some(function(t){return ap(t,today())&&(t.log||{})[today()]===undefined}))ckOpen(today())}
 function sync(){
  if(!gotT||!gotM||dragId)return;
@@ -329,12 +362,12 @@ function sync(){
   hyd=true;var m=MEM[ME]||{};if(m.act)S.act=m.act;if(m.focus)S.focus=m.focus;ready=true;
   if(tsnap.empty&&S.tasks.length&&OWN){LAST={};LASTM=""}else{rebuild();LASTM=MEM[ME]?JSON.stringify(mine()):""}
   push();status();render();maybeCk();return}
- rebuild();status();render();
+ rebuild();status();render(true);
 }
 function names(ids){
  if(!USR||!USR.profiles)return;var need=ids.filter(function(i,k){return i&&ids.indexOf(i)===k&&!NM[i]});if(!need.length)return;
  need.forEach(function(i){NM[i]="Student"});
- USR.profiles(need).then(function(p){need.forEach(function(i){if(p&&p[i]&&p[i].name)NM[i]=p[i].name});if(tab==="team"||tab==="board")render()}).catch(function(){});
+ USR.profiles(need).then(function(p){need.forEach(function(i){if(p&&p[i]&&p[i].name)NM[i]=p[i].name});if(tab==="team"||tab==="board")render(true)}).catch(function(){});
 }
 function nm(i){return i===ME?"You":NM[i]||"Student"}
 function stk(a){var d=today(),n=0;if(!a[d])d=addDays(d,-1);while(a[d]){n++;d=addDays(d,-1)}return n}
@@ -343,14 +376,14 @@ function vTeam(){
  var d=today(),ids=Object.keys(MEM);if(ids.indexOf(ME)<0)ids.unshift(ME);
  names(ids.concat(S.tasks.map(function(t){return t.by})));
  var tk=S.tasks.filter(function(t){return t.ty==="task"}),dn=tk.filter(function(t){return t.st==="done"}).length,hb=S.tasks.filter(function(t){return t.ty==="daily"&&t.fq!=="w"&&t.fq!=="o"});
- var head='<div class="panel"><h2>Team plan</h2><p class="hint">Everyone who signs in edits the same board live. Habit check-ins stay personal, and the team sees your progress.'+(canW?"":" You have read-only access, so ask the owner to update the sharing rules.")+'</p><button class="run" data-go="board" data-col="done"><div class="srow"><span>Team tasks finished</span><span>'+dn+" of "+tk.length+'</span></div><div class="rb" style="--c:var(--l0)"><i style="width:'+(tk.length?Math.round(dn/tk.length*100):0)+'%"></i></div></button></div>';
+ var head='<div class="panel"><h2>Team plan</h2><p class="hint">You are signed in as '+esc(EML)+' with the role <b>'+(RL[ROLE]||"Viewer")+'</b>. Editors can change the board, commenters can only comment, viewers can only look. Habit check-ins stay personal, and the team sees your progress.</p><button class="run" data-go="board" data-col="done"><div class="srow"><span>Team tasks finished</span><span>'+dn+" of "+tk.length+'</span></div><div class="rb" style="--c:var(--l0)"><i style="width:'+(tk.length?Math.round(dn/tk.length*100):0)+'%"></i></div></button></div>';
  var rows=ids.map(function(id){
   var m=id===ME?mine():MEM[id]||{},a=0,y=0,f7=0,x,j;
   for(j=0;j<30;j++){x=addDays(d,-j);hb.forEach(function(t){if(ap(t,x)){a++;if(m.logs&&m.logs[t.id]&&m.logs[t.id][x]===1)y++}})}
   for(j=0;j<7;j++)f7+=(m.focus&&m.focus[addDays(d,-j)])||0;
   var fin=tk.filter(function(t){return t.doneBy===id}).length,add=tk.filter(function(t){return t.by===id}).length,p=a?Math.round(y/a*100):0;
   return '<div class="panel"><div class="srow"><b>'+esc(nm(id))+'</b><span>'+(m.act&&m.act[d]?"Active today":"Not yet today")+'</span></div><div class="meta"><span class="tag">'+stk(m.act||{})+'-day streak</span><span class="tag">'+f7+' focus min this week</span><span class="tag">'+fin+' finished</span><span class="tag">'+add+' added</span></div><div class="srow"><span>Habits, last 30 days</span><span>'+p+'%</span></div><div class="rb" style="--c:var(--l1)"><i style="width:'+p+'%"></i></div></div>'}).join("");
- return head+rows;
+ return head+accPanel()+rows;
 }
 function start(){
  var c=window.claude;
@@ -362,6 +395,9 @@ function start(){
   return Promise.all([u.id(),u.isOwner(),u.can?u.can("data.write"):null]).then(function(q){
    if(!q[0]){maybeCk();return}
    ME=q[0];OWN=q[1];if(q[2]===false)canW=false;DB=db;live=true;clearTimeout(tm);
+   var P=window.PLANNER||{};ROLE=P.role||"viewer";EML=P.email||"";MEN=P.name||"Student";canC=ROLE!=="viewer";
+   db.collection("comments").onSnapshot(function(s){CMT=s.docs.map(function(d){var c=d.data();c.id=d.id;return c});if(!dragId){render(true);var ci=$("cmi");if(!$("cm").hidden&&(!ci||!ci.value))cmDraw()}},function(){CMT=[]});
+   if(ROLE==="owner")db.collection("access").onSnapshot(function(s){ACC={};s.docs.forEach(function(d){ACC[d.id]=d.data()});render(true)},function(){});
    db.collection("tasks").onSnapshot(function(s){tsnap=s;gotT=true;sync()},function(){DB=null;live=false;status();render();maybeCk()});
    db.collection("members").onSnapshot(function(s){MEM={};s.docs.forEach(function(d){MEM[d.id]=d.data()});gotM=true;sync()},function(){DB=null;live=false;status();render();maybeCk()});
   });
@@ -372,19 +408,21 @@ var dragId=null,V=$("view");
 V.addEventListener("click",function(e){
  var b=e.target.closest("button[data-a]");if(!b)return;
  var t=find(b.dataset.id),a=b.dataset.a;if(!t)return;
- if(a==="del"){S.tasks=S.tasks.filter(function(x){return x.id!==t.id});save();render()}
+ if(a==="cm"){cmOpen(t.id);return}
+ if(ro()&&a!=="hab"){denied();return}
+ if(a==="del"){S.tasks=S.tasks.filter(function(x){return x.id!==t.id});if(live&&DB)CMT.filter(function(c){return c.tid===t.id}).forEach(function(c){DB.doc("comments/"+c.id).delete().catch(fail)});save();render()}
  else if(a==="m"){var k=COLS.map(function(c){return c[0]}),n=k[k.indexOf(t.st)+ +b.dataset.d];if(n)move(t,n)}
  else if(a==="go"){move(t,t.st==="todo"?"doing":"done")}
  else if(a==="rev"){t.step++;t.nextRev=t.step>=INT.length?null:addDays(today(),INT[t.step]);mark();save();render()}
  else if(a==="hab"){t.log=t.log||{};var d=today();if(t.log[d])delete t.log[d];else{t.log[d]=1;mark()}save();render()}
 });
-V.addEventListener("dragstart",function(e){var c=e.target.closest(".card");if(!c)return;dragId=c.dataset.id;c.classList.add("drag");try{e.dataTransfer.setData("text/plain",dragId);e.dataTransfer.effectAllowed="move"}catch(x){}});
+V.addEventListener("dragstart",function(e){var c=e.target.closest(".card");if(!c||ro())return;dragId=c.dataset.id;c.classList.add("drag");try{e.dataTransfer.setData("text/plain",dragId);e.dataTransfer.effectAllowed="move"}catch(x){}});
 V.addEventListener("dragend",function(){dragId=null;document.querySelectorAll(".drag,.over").forEach(function(n){n.classList.remove("drag","over")})});
 V.addEventListener("dragover",function(e){var c=e.target.closest(".col");if(c){e.preventDefault();document.querySelectorAll(".over").forEach(function(n){n.classList.remove("over")});c.classList.add("over")}});
 V.addEventListener("drop",function(e){var c=e.target.closest(".col");if(!c||!dragId)return;e.preventDefault();move(find(dragId),c.dataset.col)});
 
 $("f").addEventListener("submit",function(e){
- e.preventDefault();var n=$("name").value.trim();if(!n)return;
+ e.preventDefault();if(ro()){denied();return}var n=$("name").value.trim();if(!n)return;
  var v=$("ty").value;S.tasks.push({id:Date.now(),n:n,dl:$("dl").value||"",p:+$("pr").value,ty:v==="task"?"task":"daily",fq:v==="weekly"?"w":"d",by:ME,tg:Math.min(7,Math.max(1,+$("tg").value||3)),st:"todo",step:0,log:{}});
  save();$("name").value="";$("dl").value="";tab=$("ty").value==="task"?"board":"today";$("addBox").open=false;render();
 });
@@ -395,6 +433,69 @@ $("theme").addEventListener("click",function(){
 });
 $("date").textContent=new Date().toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"});
 $("st").onclick=function(){tab="team";render()};
+/* owner: manage who has access and in which role */
+function accPanel(){
+ if(ROLE!=="owner")return"";
+ var ks=Object.keys(ACC).sort();
+ var opts=function(sel){return ["editor","commenter","viewer"].map(function(r){return '<option value="'+r+'"'+(r===sel?" selected":"")+">"+RL[r]+"</option>"}).join("")};
+ return '<div class="panel"><h2>Manage access</h2><p class="hint">Only people on this list can open the board. Add a Google email and choose what that person can do.</p>'+(ks.length?ks.map(function(k){return '<div class="row l1"><div class="name">'+esc(k)+'</div><select data-acc="'+esc(k)+'" aria-label="Role for '+esc(k)+'" style="width:auto">'+opts(ACC[k].role)+'</select><button class="btn alt" data-accdel="'+esc(k)+'" aria-label="Remove '+esc(k)+'">Remove</button></div>'}).join(""):'<div class="empty">Nobody added yet.</div>')+'<form id="accf" style="grid-template-columns:1fr auto auto;align-items:end"><input id="acce" type="email" required placeholder="name@gmail.com" aria-label="Email to add"><select id="accr" aria-label="Role" style="width:auto">'+opts("editor")+'</select><button class="btn" type="submit">Add</button></form></div>';
+}
+function accSet(k,r){if(ROLE!=="owner"||!DB)return;DB.doc("access/"+k).set({email:k,role:r,by:ME,ts:Date.now()}).catch(function(){alert("Could not save. Check that the new Firestore rules are published.")})}
+V.addEventListener("submit",function(e){
+ if(e.target.id!=="accf")return;e.preventDefault();
+ var em=$("acce").value.trim().toLowerCase();
+ if(!/^[^@\s\/]+@[^@\s\/]+\.[^@\s\/]+$/.test(em)){alert("Enter a valid email address.");return}
+ accSet(em,$("accr").value);$("acce").value="";$("acce").blur();
+});
+V.addEventListener("change",function(e){var k=e.target.dataset&&e.target.dataset.acc;if(!k)return;accSet(k,e.target.value);e.target.blur()});
+V.addEventListener("click",function(e){var b=e.target.closest("button[data-accdel]");if(!b||ROLE!=="owner"||!DB)return;var k=b.dataset.accdel;if(confirm("Remove "+k+"? They will lose access."))DB.doc("access/"+k).delete().catch(function(){alert("Could not remove.")})});
+
+/* comments on cards */
+function cmCount(id){return CMT.filter(function(c){return c.tid===id}).length}
+function cmOpen(id){cmT=id;cmDraw();$("cm").hidden=false}
+function cmDraw(){
+ var t=find(cmT);if(!t){$("cm").hidden=true;return}
+ var list=CMT.filter(function(c){return c.tid===cmT}).sort(function(a,b){return a.ts-b.ts});
+ $("cmb").innerHTML='<h2>'+esc(t.n)+'</h2><p class="hint">Comments</p>'+(list.length?list.map(function(c){return '<div class="row l1"><div class="name"><div class="meta"><b>'+esc(c.name||"Student")+'</b><span>'+new Date(c.ts).toLocaleString()+'</span></div>'+esc(c.text)+'</div>'+((c.by===ME||canW)?'<button style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-cdel="'+esc(c.id)+'" aria-label="Delete comment">×</button>':"")+'</div>'}).join(""):'<div class="empty">No comments yet.</div>')+(canC?'<form id="cmf" style="grid-template-columns:1fr auto"><input id="cmi" maxlength="300" placeholder="Write a comment" aria-label="Write a comment"><button class="btn" type="submit">Post</button></form>':'<p class="hint">Viewers can read comments but not post.</p>')+'<button class="btn" id="cmx" style="width:100%;margin-top:12px">Close</button>';
+}
+var CM=$("cm");
+CM.addEventListener("click",function(e){
+ if(e.target===CM||e.target.id==="cmx"){CM.hidden=true;render(true);return}
+ var b=e.target.closest("button[data-cdel]");if(b&&DB)DB.doc("comments/"+b.dataset.cdel).delete().catch(fail);
+});
+CM.addEventListener("submit",function(e){
+ e.preventDefault();var i=$("cmi"),x=i?i.value.trim():"";if(!x||!DB||!canC||!cmT)return;
+ DB.doc("comments/"+Date.now()+"-"+ME.slice(0,6)).set({tid:cmT,by:ME,name:MEN,text:x,ts:Date.now()}).catch(function(){alert("Could not post the comment.")});i.value="";
+});
+document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!CM.hidden){CM.hidden=true;render(true)}});
+
+/* export / import all app data as a JSON file */
+function dmsg(t){$("dmsg").textContent=t}
+$("exp").onclick=function(){
+ var data={app:"study-planner",version:2,exported:new Date().toISOString(),tasks:S.tasks,act:S.act,focus:S.focus};
+ var a=document.createElement("a"),u=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
+ a.href=u;a.download="study-planner-backup-"+today()+".json";document.body.appendChild(a);a.click();a.remove();
+ setTimeout(function(){URL.revokeObjectURL(u)},1000);
+ dmsg("Exported "+S.tasks.length+" items.");
+};
+$("imp").onclick=function(){$("impf").click()};
+$("impf").onchange=function(){
+ var f=this.files[0];this.value="";if(!f)return;
+ var r=new FileReader();
+ r.onerror=function(){dmsg("Could not read that file.")};
+ r.onload=function(){
+  var d;try{d=JSON.parse(r.result)}catch(e){dmsg("That file is not valid JSON.");return}
+  if(!d||d.app!=="study-planner"||!Array.isArray(d.tasks)){dmsg("That file is not a Study Planner backup.");return}
+  if(ro()){dmsg("Your role cannot change the shared board, so import is turned off.");return}
+  var tasks=d.tasks.filter(function(t){return t&&typeof t.n==="string"&&isFinite(t.id)}).map(function(t){
+   t.id=+t.id;t.log=(t.log&&typeof t.log==="object")?t.log:{};if(t.own)t.own=ME;return t});
+  var msg="Replace ALL current data with this file ("+tasks.length+" items)? Anything not in the file will be removed."+(live?" Live sync is on, so this also updates the shared board for everyone.":"");
+  if(!confirm(msg))return;
+  S.tasks=tasks;S.act=(d.act&&typeof d.act==="object")?d.act:{};S.focus=(d.focus&&typeof d.focus==="object")?d.focus:{};
+  save();render();dmsg("Imported "+tasks.length+" items.");
+ };
+ r.readAsText(f);
+};
 load();render();start();
 })();
 </script>
