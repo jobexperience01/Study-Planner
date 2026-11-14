@@ -154,6 +154,7 @@ header .tag{min-height:36px;padding:0 12px!important;display:inline-flex;align-i
 .fchips .cnt{background:rgba(127,127,127,.22);color:inherit}
 .stt.reg{--c:#7a4fd6}
 label[hidden]{display:none}
+#teamBar[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -164,6 +165,7 @@ label[hidden]{display:none}
 </header>
 <div class="panel" id="noacc" hidden style="margin:12px 0 0"></div>
 <div class="panel" id="reqbar" hidden style="margin:12px 0 0"></div>
+<div id="teamBar" hidden style="margin:12px 0 0"></div>
 
 <section class="hero" aria-live="polite">
 <div><b id="hPct">0%</b><span>Tasks finished</span></div>
@@ -181,6 +183,7 @@ label[hidden]{display:none}
 <label id="tgL" hidden>Times per week<input id="tg" type="number" min="1" max="7" value="3"></label>
 <label>Start time (optional)<input id="ts" type="time"></label>
 <label>End time (optional)<input id="te" type="time"></label>
+<label class="full" id="tmL" hidden>Team<select id="tmSel"></select></label>
 <label class="full">Alarm (rings at the start time, default alarm sound)<select id="al"></select></label>
 <button class="btn alt full" type="button" id="tstA">Test alarm sound</button>
 <button class="btn full" type="submit">Add task</button>
@@ -227,13 +230,13 @@ var authed=new Promise(function(res){
 var roleP=authed.then(function(u){
   if(!u)return null;
   var em=(u.email||"").toLowerCase();
-  if(em===OWNER_EMAIL&&u.emailVerified)return "owner";
-  return fs.doc("access/"+em).get().then(function(s){return s.exists?s.data().role:null}).catch(function(){return null});
+  if(em===OWNER_EMAIL&&u.emailVerified)return{role:"owner",teams:[],name:u.displayName||""};
+  return fs.doc("access/"+em).get().then(function(s){return s.exists?{role:s.data().role,teams:s.data().teams||[],name:s.data().name||""}:null}).catch(function(){return null});
 });
 window.PLANNER={role:null,email:"",name:""};
 var ctx=Promise.all([authed,roleP]).then(function(r){
-  var u=r[0],role=r[1];
-  if(u)window.PLANNER={role:role,email:(u.email||"").toLowerCase(),name:u.displayName||u.email||"Student"};
+  var u=r[0],ri=r[1],role=ri?ri.role:null;
+  if(u)window.PLANNER={role:role,email:(u.email||"").toLowerCase(),name:(ri&&ri.name)||u.displayName||u.email||"Student",teams:(ri&&ri.teams)||[]};
   return{u:u,role:role};
 });
 function requestUi(u){
@@ -252,8 +255,10 @@ function requestUi(u){
         fs.doc("requests/"+em).delete().then(function(){draw(false)}).catch(function(){alert("Could not cancel the request.")});
       }));
     }else{
+      var inp=document.createElement("input");inp.maxLength=40;inp.placeholder="Your name (shown on tasks you add)";inp.value=u.displayName||"";inp.setAttribute("aria-label","Your name");inp.style.cssText="margin:0 0 10px";n.appendChild(inp);
       n.appendChild(mk("Request access","",function(){
-        fs.doc("requests/"+em).set({email:em,name:u.displayName||"",uid:u.uid,status:"pending",ts:Date.now()})
+        var nmv=(inp.value||"").trim();if(!nmv){alert("Please enter your name first.");return}
+        fs.doc("requests/"+em).set({email:em,name:nmv,uid:u.uid,status:"pending",ts:Date.now()})
           .then(function(){draw(true)})
           .catch(function(){alert("Could not send the request. Ask the owner to publish the latest Firestore rules.")});
       }));
@@ -282,7 +287,7 @@ window.claude={use:function(n){
         var r=fs.doc(p);
         if(p.indexOf("members/")===0){
           var s=r.set.bind(r);
-          r.set=function(d){d.name=u.displayName||"Student";return s(d)};
+          r.set=function(d){d.name=(window.PLANNER&&window.PLANNER.name)||u.displayName||"Student";d.email=(window.PLANNER&&window.PLANNER.email)||"";return s(d)};
         }
         return r;
       }
@@ -343,14 +348,14 @@ function streak(){var d=today(),n=0;if(!S.act[d])d=addDays(d,-1);while(S.act[d])
 function card(t){
  var L=lvl(t),i=COLS.map(function(c){return c[0]}).indexOf(t.st),rev="",rw=!ro(),cmb=live?'<button data-a="cm" data-id="'+t.id+'" aria-label="Comments">💬 '+cmCount(t.id)+"</button>":"";
  if(t.st==="done"){rev=t.nextRev?(diff(t.nextRev)<=0?'<span class="late">Revise today</span>':"<span>Revise in "+diff(t.nextRev)+"d</span>"):"<span>Mastered ✓</span>"}
- return '<div class="card l'+L.i+'" draggable="'+rw+'" data-id="'+t.id+'"><div class="name">'+esc(t.n)+'</div><div class="meta"><span class="tag">'+LV[L.i]+"</span>"+(L.up?'<span class="tag up">↑ from '+L.from+"</span>":"")+(t.st==="done"?rev:left(t.dl))+tmTag(t)+(t.by&&t.by!==ME&&NM[t.by]?"<span>by "+esc(NM[t.by])+"</span>":"")+'</div><div class="acts">'+(rw?'<button class="btn'+(t.st==="done"?" alt":"")+'" data-a="'+(t.st==="done"?"to":"go")+'"'+(t.st==="done"?' data-st="todo"':"")+' data-id="'+t.id+'">'+(t.st==="todo"?"Start":t.st==="doing"?"Mark done ✓":"Reopen")+'</button>':"")+cmb+(rw?'<button data-a="more" data-id="'+t.id+'" aria-label="More actions">⋯</button>':"")+'</div></div>';
+ return '<div class="card l'+L.i+'" draggable="'+rw+'" data-id="'+t.id+'"><div class="name">'+esc(t.n)+'</div><div class="meta"><span class="tag">'+LV[L.i]+"</span>"+(L.up?'<span class="tag up">↑ from '+L.from+"</span>":"")+(t.st==="done"?rev:left(t.dl))+tmTag(t)+(!curTeam&&t.team&&TM[t.team]?'<span class="tag">'+esc(TM[t.team].name)+"</span>":"")+(t.by&&t.by!==ME&&(t.byn||NM[t.by])?"<span>by "+esc(t.byn||NM[t.by])+"</span>":"")+'</div><div class="acts">'+(rw?'<button class="btn'+(t.st==="done"?" alt":"")+'" data-a="'+(t.st==="done"?"to":"go")+'"'+(t.st==="done"?' data-st="todo"':"")+' data-id="'+t.id+'">'+(t.st==="todo"?"Start":t.st==="doing"?"Mark done ✓":"Reopen")+'</button>':"")+cmb+(rw?'<button data-a="more" data-id="'+t.id+'" aria-label="More actions">⋯</button>':"")+'</div></div>';
 }
 function vBoard(){
  var sg='<div class="seg" role="tablist" aria-label="Board view"><button data-bv="board" aria-pressed="'+(bview==="board")+'">Board</button><button data-bv="table" aria-pressed="'+(bview==="table")+'">Table</button></div>';
  return sg+(bview==="table"?vTable():vBoardCols());
 }
 function vBoardCols(){names(S.tasks.map(function(t){return t.by}));
- var tk=S.tasks.filter(function(t){return t.ty==="task"});
+ var tk=VT().filter(function(t){return t.ty==="task"});
  var chips='<div class="stages" role="tablist">'+COLS.map(function(c){return '<button data-stage="'+c[0]+'" aria-pressed="'+(bcol===c[0])+'">'+c[1]+'<span class="cnt">'+tk.filter(function(t){return t.st===c[0]}).length+"</span></button>"}).join("")+"</div>";
  return chips+'<p class="hint">Tap a card’s main button to move it forward. Swipe a card right or left, or tap ⋯ for more. On a computer you can also drag cards. Priority rises on its own as deadlines get close.</p><div class="board">'+COLS.map(function(c){
   var items=tk.filter(function(t){return t.st===c[0]}).sort(sortT);
@@ -358,7 +363,7 @@ function vBoardCols(){names(S.tasks.map(function(t){return t.by}));
  }).join("")+"</div>";
 }
 function vToday(){
- var d=today(),tk=S.tasks.filter(function(t){return t.ty==="task"}),dl=habs().filter(function(t){return ap(t,today())});
+ var d=today(),tk=VT().filter(function(t){return t.ty==="task"}),dl=habs().filter(function(t){return ap(t,today())});
  var tot=tk.length||1,cnt={};COLS.forEach(function(c){cnt[c[0]]=tk.filter(function(t){return t.st===c[0]}).length});
  var colr={todo:"var(--l2)",doing:"var(--l1)",done:"var(--l0)"};
  var prog='<div class="panel"><h2>Progress by stage</h2>'+COLS.map(function(c){return '<div class="srow"><span>'+c[1]+"</span><span>"+cnt[c[0]]+" of "+tk.length+'</span></div><div class="bar" style="--c:'+colr[c[0]]+'"><i style="width:'+Math.round(cnt[c[0]]/tot*100)+'%"></i></div>'}).join("")+"</div>";
@@ -367,7 +372,7 @@ function vToday(){
  var due=tk.filter(function(t){return t.st==="done"&&t.nextRev&&diff(t.nextRev)<=0});
  var rev='<div class="panel"><h2>Revise today ('+due.length+')</h2>'+(due.length?due.map(function(t){return '<div class="row l0"><div class="name">'+esc(t.n)+'<div class="meta"><span>Round '+(t.step+1)+" of "+INT.length+'</span></div></div><button class="btn" data-a="rev" data-id="'+t.id+'">Revised</button></div>'}).join(""):'<div class="empty">No revisions due. Finished tasks come back after 1, 3, 7, 14 and 30 days.</div>')+"</div>";
  var hab='<div class="panel"><h2>Daily habits <button class="btn alt" data-go="check" data-date="'+d+'" style="min-height:32px;float:right">Check-in</button></h2>'+(dl.length?dl.map(function(t){var on=!!(t.log&&t.log[d]);return '<div class="row l'+lvl(t).i+'"><button class="chk" aria-pressed="'+on+'" aria-label="Mark done today" data-a="hab" data-id="'+t.id+'">'+(on?"✓":"")+'</button><div class="name">'+esc(t.n)+habMeta(t,d)+'</div><button class="acts" style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-a="tm" data-id="'+t.id+'" aria-label="Set time and alarm">⏰</button><button class="acts" style="background:none;border:0;font-size:1.2rem;color:var(--mute)" data-a="del" data-id="'+t.id+'" aria-label="Delete habit">×</button></div>'}).join(""):'<div class="empty">No habits yet. Add one with type “Daily habit”.</div>')+"</div>";
- var timed=S.tasks.filter(function(t){return X(t).ts&&(t.ty==="task"?elig(t,d):t.ty==="daily"&&ap(t,d)&&(!t.own||t.own===ME))}).sort(function(a,b){return X(a).ts.localeCompare(X(b).ts)});
+ var timed=VT().filter(function(t){return X(t).ts&&(t.ty==="task"?elig(t,d):t.ty==="daily"&&ap(t,d)&&(!t.own||t.own===ME))}).sort(function(a,b){return X(a).ts.localeCompare(X(b).ts)});
  var sched='<div class="panel"><h2>Today’s schedule</h2>'+(timed.length?timed.map(function(t){var dn=t.ty==="daily"&&t.log&&t.log[d]===1;return '<div class="row l'+lvl(t).i+'"><div class="name"><span class="tsub">'+esc(tmTxt(t))+'</span><br>'+esc(t.n)+(dn?" ✓":"")+'</div><button class="btn alt" data-a="tm" data-id="'+t.id+'" aria-label="Edit time and alarm">⏰</button></div>'}).join(""):'<div class="empty">No timed tasks today. Add a start time to a task to see your day here.</div>')+"</div>";
  return '<div class="grid2"><div>'+sched+prog+focus+'</div><div>'+rev+hab+"</div></div>";
 }
@@ -384,13 +389,13 @@ function tEvents(){
  $("tmd").onclick=function(){tSet(T.mode==="f"?"b":"f");render()};
 }
 function stats(){
- var tk=S.tasks.filter(function(t){return t.ty==="task"}),dn=tk.filter(function(t){return t.st==="done"}).length;
+ var tk=VT().filter(function(t){return t.ty==="task"}),dn=tk.filter(function(t){return t.st==="done"}).length;
  $("hPct").textContent=(tk.length?Math.round(dn/tk.length*100):0)+"%";
  $("hStreak").textContent=streak();
  $("hFocus").textContent=S.focus[today()]||0;
 }
 function render(soft){
- reqUi();
+ reqUi();memRebuild();teamBar();
  var ae=document.activeElement;if(soft&&tab==="team"&&ae&&/^(INPUT|SELECT)$/.test(ae.tagName)&&ae.closest&&ae.closest("#view"))return;
  document.querySelectorAll(".tabs button").forEach(function(b){b.setAttribute("aria-selected",b.dataset.t===tab)});
  $("view").innerHTML=tab==="board"?vBoard():tab==="today"?vToday():tab==="graphs"?vGraphs():tab==="team"?vTeam():vTimer();
@@ -402,7 +407,7 @@ function creD(t){return fmt(new Date(t.id))}
 function ap(t,d){if(t.fq==="o")return t.od===d;var e=X(t).ed;return creD(t)<=d&&(!e||d<=e)}
 function wk(d){var x=new Date(d+"T00:00:00");x.setDate(x.getDate()-((x.getDay()+6)%7));return fmt(x)}
 function wc(t,s){var n=0;for(var i=0;i<7;i++){if(t.log&&t.log[addDays(s,i)]===1)n++}return n}
-function habs(){return S.tasks.filter(function(t){return t.ty==="daily"&&(!t.own||t.own===ME)})}
+function habs(){return VT().filter(function(t){return t.ty==="daily"&&(!t.own||t.own===ME)})}
 function flash(id,col){setTimeout(function(){var el=id?document.querySelector('[data-id="'+id+'"]'):col?document.querySelector('.col[data-col="'+col+'"]'):null;if(el){el=el.closest(".card,.row,.col")||el;el.classList.add("flash");el.scrollIntoView({block:"center",behavior:"smooth"})}},60)}
 
 /* daily check-in sheet */
@@ -419,12 +424,12 @@ CK.addEventListener("click",function(e){
  if(b.dataset.d){ckD=b.dataset.d;ckDraw();return}
  if(b.dataset.v!==undefined){var t=find(b.parentNode.dataset.id),v=+b.dataset.v;if(!t)return;t.log=t.log||{};if(t.log[ckD]===v)delete t.log[ckD];else{t.log[ckD]=v;if(v===1)mark()}save();ckDraw();stats()}
 });
-CK.addEventListener("submit",function(e){e.preventDefault();var n=$("cki").value.trim();if(!n||ro())return;S.tasks.push({id:Date.now(),n:n,ty:"daily",fq:"o",od:ckD,own:ME,p:1,st:"todo",step:0,log:{}});save();ckDraw()});
+CK.addEventListener("submit",function(e){e.preventDefault();var n=$("cki").value.trim();if(!n||ro())return;var tm0=defTeam();if(live&&hasTeams()&&!tm0){toast("Choose a team in the bar at the top first");return}S.tasks.push({id:Date.now(),n:n,ty:"daily",fq:"o",od:ckD,own:ME,by:ME,byn:MEN,team:tm0,p:1,st:"todo",step:0,log:{}});save();ckDraw()});
 document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!CK.hidden){CK.hidden=true;render()}});
 
 /* graphs: every bar, slice and badge jumps somewhere */
 function vGraphs(){
- var d=today(),tk=S.tasks.filter(function(t){return t.ty==="task"}),H=habs(),hb=H.filter(function(t){return t.fq!=="w"&&t.fq!=="o"}),wh=H.filter(function(t){return t.fq==="w"}),ws=wk(d),i,k;
+ var d=today(),tk=VT().filter(function(t){return t.ty==="task"}),H=habs(),hb=H.filter(function(t){return t.fq!=="w"&&t.fq!=="o"}),wh=H.filter(function(t){return t.fq==="w"}),ws=wk(d),i,k;
  var cs={todo:"var(--l2)",doing:"var(--l1)",done:"var(--l0)"},off=0,tot=tk.length||1,nd=0;
  var arcs=COLS.map(function(c){var n=tk.filter(function(t){return t.st===c[0]}).length,p=n/tot*100,s=n?'<circle data-go="board" data-col="'+c[0]+'" r="15.9155" cx="21" cy="21" fill="none" stroke="'+cs[c[0]]+'" stroke-width="6" stroke-dasharray="'+p+" "+(100-p)+'" stroke-dashoffset="'+(25-off)+'"><title>'+c[1]+": "+n+"</title></circle>":"";off+=p;if(c[0]==="done")nd=n;return s}).join("");
  var leg=COLS.map(function(c){return '<button class="run" data-go="board" data-col="'+c[0]+'"><span class="tag" style="background:'+cs[c[0]]+';color:#fff">'+tk.filter(function(t){return t.st===c[0]}).length+"</span> "+c[1]+"</button>"}).join("");
@@ -465,9 +470,10 @@ function push(){
  Object.keys(LAST).forEach(function(id){if(!ids[id]){delete LAST[id];DB.doc("tasks/"+id).delete().catch(failT)}});
  }
  var m=JSON.stringify(mine());if(m!==LASTM){LASTM=m;DB.doc("members/"+ME).set(JSON.parse(m)).catch(fail)}
+ myTeamIds().forEach(function(tid){var p=mineFor(tid),j=JSON.stringify(p);if(LASTP[tid]!==j){LASTP[tid]=j;p.name=MEN;p.uid=ME;DB.doc("teams/"+tid+"/progress/"+ME).set(p).catch(fail)}});
 }
 function rebuild(){
- var old={},ML=(MEM[ME]&&MEM[ME].logs)||{};S.tasks.forEach(function(t){old[t.id]=t});LAST={};
+ var old={},ML=(MY&&MY.logs)||{};S.tasks.forEach(function(t){old[t.id]=t});LAST={};
  S.tasks=tsnap.docs.map(function(d){var t=d.data();t.log=(old[t.id]&&old[t.id].log)||ML[t.id]||{};LAST[t.id]=JSON.stringify(shared(t));return t});
 }
 function status(){var b=$("st"),n=Object.keys(MEM).length,a=$("fab");if(b)b.textContent=!live?"Solo":"Live · "+(RL[ROLE]||"Viewer")+" · "+Math.max(1,n)+(n>1?" members":" member");if(a)a.style.display=ro()?"none":""}
@@ -475,8 +481,8 @@ function maybeCk(){if(ckAuto)return;ckAuto=true;if(habs().some(function(t){retur
 function sync(){
  if(!gotT||!gotM||dragId)return;
  if(!hyd){
-  hyd=true;var m=MEM[ME]||{};if(m.act)S.act=m.act;if(m.focus)S.focus=m.focus;ready=true;
-  if(tsnap.empty&&S.tasks.length&&OWN){LAST={};LASTM=""}else{rebuild();LASTM=MEM[ME]?JSON.stringify(mine()):""}
+  hyd=true;var m=MY||{};if(m.act)S.act=m.act;if(m.focus)S.focus=m.focus;ready=true;
+  if(tsnap.empty&&S.tasks.length&&OWN){LAST={};LASTM=""}else{rebuild();LASTM=MY?JSON.stringify(mine()):""}
   push();status();render();maybeCk();return}
  rebuild();status();render(true);
 }
@@ -491,15 +497,15 @@ function vTeam(){
  if(!live)return '<div class="panel"><h2>Team</h2><p class="hint">Live sync is off. Tap “Sign in with Google” at the top to plan with other students.</p></div>';
  var d=today(),ids=Object.keys(MEM);if(ids.indexOf(ME)<0)ids.unshift(ME);
  names(ids.concat(S.tasks.map(function(t){return t.by})));
- var tk=S.tasks.filter(function(t){return t.ty==="task"}),dn=tk.filter(function(t){return t.st==="done"}).length,hb=S.tasks.filter(function(t){return t.ty==="daily"&&t.fq!=="w"&&t.fq!=="o"});
- var head='<div class="panel"><h2>Team plan</h2><p class="hint">You are signed in as '+esc(EML)+' with the role <b>'+(RL[ROLE]||"Viewer")+'</b>. Editors can change the board, commenters can only comment, viewers can only look. Habit check-ins stay personal, and the team sees your progress.</p><button class="run" data-go="board" data-col="done"><div class="srow"><span>Team tasks finished</span><span>'+dn+" of "+tk.length+'</span></div><div class="rb" style="--c:var(--l0)"><i style="width:'+(tk.length?Math.round(dn/tk.length*100):0)+'%"></i></div></button></div>';
+ var tk=VT().filter(function(t){return t.ty==="task"}),dn=tk.filter(function(t){return t.st==="done"}).length,hb=VT().filter(function(t){return t.ty==="daily"&&t.fq!=="w"&&t.fq!=="o"});
+ var head='<div class="panel"><h2>Team plan'+(curTeam&&curTeam!=="none"?" · "+esc(teamName(curTeam)):"")+'</h2><p class="hint">You are signed in as '+esc(EML)+' with the role <b>'+(RL[ROLE]||"Viewer")+'</b>. Editors can change the board, commenters can only comment, viewers can only look. Habit check-ins stay personal, and the team sees your progress.</p><button class="run" data-go="board" data-col="done"><div class="srow"><span>Team tasks finished</span><span>'+dn+" of "+tk.length+'</span></div><div class="rb" style="--c:var(--l0)"><i style="width:'+(tk.length?Math.round(dn/tk.length*100):0)+'%"></i></div></button></div>';
  var rows=ids.map(function(id){
   var m=id===ME?mine():MEM[id]||{},a=0,y=0,f7=0,x,j;
   for(j=0;j<30;j++){x=addDays(d,-j);hb.forEach(function(t){if(ap(t,x)){a++;if(m.logs&&m.logs[t.id]&&m.logs[t.id][x]===1)y++}})}
   for(j=0;j<7;j++)f7+=(m.focus&&m.focus[addDays(d,-j)])||0;
   var fin=tk.filter(function(t){return t.doneBy===id}).length,add=tk.filter(function(t){return t.by===id}).length,p=a?Math.round(y/a*100):0;
   return '<div class="panel"><div class="srow"><b>'+esc(nm(id))+'</b><span>'+(m.act&&m.act[d]?"Active today":"Not yet today")+'</span></div><div class="meta"><span class="tag">'+stk(m.act||{})+'-day streak</span><span class="tag">'+f7+' focus min this week</span><span class="tag">'+fin+' finished</span><span class="tag">'+add+' added</span></div><div class="srow"><span>Habits, last 30 days</span><span>'+p+'%</span></div><div class="rb" style="--c:var(--l1)"><i style="width:'+p+'%"></i></div></div>'}).join("");
- return head+reqPanel()+accPanel()+rows;
+ return head+teamsPanel()+reqPanel()+accPanel()+rows;
 }
 function start(){
  var c=window.claude;
@@ -511,17 +517,157 @@ function start(){
   return Promise.all([u.id(),u.isOwner(),u.can?u.can("data.write"):null]).then(function(q){
    if(!q[0]){maybeCk();return}
    ME=q[0];OWN=q[1];if(q[2]===false)canW=false;DB=db;live=true;clearTimeout(tm);
-   var P=window.PLANNER||{};ROLE=P.role||"viewer";EML=P.email||"";MEN=P.name||"Student";canC=ROLE!=="viewer";
-   db.collection("comments").onSnapshot(function(s){CMT=s.docs.map(function(d){var c=d.data();c.id=d.id;return c});if(!dragId){render(true);var ci=$("cmi");if(!$("cm").hidden&&(!ci||!ci.value))cmDraw()}},function(){CMT=[]});
-   if(ROLE==="owner")db.collection("access").onSnapshot(function(s){ACC={};s.docs.forEach(function(d){ACC[d.id]=d.data()});reqUi();render(true)},function(){});
-   if(ROLE==="owner")db.collection("requests").onSnapshot(function(s){REQ={};s.docs.forEach(function(d){REQ[d.id]=d.data()});reqUi();render(true)},function(){});
-   db.collection("tasks").onSnapshot(function(s){tsnap=s;gotT=true;sync()},function(){DB=null;live=false;status();render();maybeCk()});
-   db.collection("members").onSnapshot(function(s){MEM={};s.docs.forEach(function(d){MEM[d.id]=d.data()});gotM=true;sync()},function(){DB=null;live=false;status();render();maybeCk()});
+   var P=window.PLANNER||{};ROLE=P.role||"viewer";EML=P.email||"";MEN=P.name||"Student";canC=ROLE!=="viewer";MYT=ROLE==="owner"?[]:(P.teams||[]);
+   var fb=function(){DB=null;live=false;status();render();maybeCk()};
+   DB.doc("members/"+ME).onSnapshot(function(s){MY=s.exists?s.data():null;gotM=true;sync()},fb);
+   if(ROLE==="owner"){
+    db.collection("teams").onSnapshot(function(s){TM={};s.docs.forEach(function(d){TM[d.id]=d.data()});teamsChanged()},function(){});
+    db.collection("access").onSnapshot(function(s){ACC={};s.docs.forEach(function(d){ACC[d.id]=d.data()});reqUi();render(true)},function(){});
+    db.collection("requests").onSnapshot(function(s){REQ={};s.docs.forEach(function(d){REQ[d.id]=d.data()});reqUi();render(true)},function(){});
+    db.collection("comments").onSnapshot(function(s){CMT=s.docs.map(function(d){var c=d.data();c.id=d.id;return c});cmDone()},function(){CMT=[]});
+    db.collection("tasks").onSnapshot(function(s){tsnap=s;gotT=true;sync()},fb);
+   }else{
+    if(!MYT.length){tsnap={docs:[],empty:true};gotT=true;sync()}
+    MYT.forEach(function(id){
+     DB.doc("teams/"+id).onSnapshot(function(s){TM[id]=s.exists?s.data():{name:"Team"};teamsChanged()},function(){TM[id]={name:"Team"}});
+     db.collection("tasks").where("team","==",id).onSnapshot(function(s){TSn[id]=s.docs;tmerge()},function(){TSn[id]=[];tmerge()});
+     db.collection("comments").where("team","==",id).onSnapshot(function(s){CMn[id]=s.docs.map(function(d){var c=d.data();c.id=d.id;return c});cmerge()},function(){CMn[id]=[];cmerge()});
+    });
+    teamsChanged();
+   }
   });
  }).catch(function(){maybeCk()});
 }
 
 var dragId=null,V=$("view");
+/* ---- teams: separate boards, per-team members, owner controls ---- */
+var TM={},MYT=[],PG={},PGU={},TSn={},CMn={},MY=null,LASTP={},RSEL={},curTeam="";
+try{curTeam=localStorage.getItem("sp-team")||""}catch(e){}
+function hasTeams(){return Object.keys(TM).length>0}
+function myTeamIds(){return ROLE==="owner"?Object.keys(TM).sort(function(a,b){return (TM[a].name||"").localeCompare(TM[b].name||"")}):MYT}
+function inTeam(t){return curTeam===""?true:curTeam==="none"?!t.team:t.team===curTeam}
+function VT(){return S.tasks.filter(inTeam)}
+function teamName(id){return id&&TM[id]?(TM[id].name||"Team"):"No team"}
+function visTeams(){return curTeam===""||curTeam==="none"?myTeamIds():[curTeam]}
+function defTeam(){if(curTeam&&curTeam!=="none")return curTeam;var a=myTeamIds();return a.length===1?a[0]:""}
+function setTeam(id){curTeam=id;try{localStorage.setItem("sp-team",id)}catch(e){}render()}
+function fixCur(){
+ if(!live)return;
+ var a=myTeamIds();
+ if(curTeam&&curTeam!=="none"&&a.indexOf(curTeam)<0)curTeam="";
+ if(ROLE!=="owner"&&curTeam==="none")curTeam="";
+ if(ROLE!=="owner"&&!curTeam&&a.length===1)curTeam=a[0];
+}
+function memRebuild(){
+ MEM={};
+ visTeams().forEach(function(tid){
+  var g=PG[tid]||{};
+  Object.keys(g).forEach(function(k){
+   var d=g[k];if(d&&d.name)NM[k]=d.name;
+   if(!MEM[k])MEM[k]={logs:{},act:d.act||{},focus:d.focus||{}};
+   var lg=d.logs||{};Object.keys(lg).forEach(function(i){MEM[k].logs[i]=lg[i]});
+  });
+ });
+}
+function mineFor(tid){
+ var lg={};
+ S.tasks.forEach(function(t){if(t.ty==="daily"&&t.team===tid&&t.log&&Object.keys(t.log).length)lg[t.id]=t.log});
+ return{logs:lg,act:S.act,focus:S.focus};
+}
+function watchProg(id){
+ if(PGU[id]||!DB)return;
+ PGU[id]=1;
+ DB.collection("teams/"+id+"/progress").onSnapshot(function(s){PG[id]={};s.docs.forEach(function(d){PG[id][d.id]=d.data()});if(!dragId)render(true)},function(){});
+}
+function teamsChanged(){fixCur();myTeamIds().forEach(watchProg);status();render(true)}
+function tmerge(){
+ if(!MYT.every(function(i){return TSn[i]}))return;
+ var all=[];MYT.forEach(function(i){all=all.concat(TSn[i])});
+ tsnap={docs:all,empty:!all.length};gotT=true;sync();
+}
+function cmDone(){if(!dragId){render(true);var ci=$("cmi");if(!$("cm").hidden&&(!ci||!ci.value))cmDraw()}}
+function cmerge(){CMT=[];MYT.forEach(function(i){(CMn[i]||[]).forEach(function(c){CMT.push(c)})});cmDone()}
+function teamBar(){
+ var b=$("teamBar");if(!b)return;
+ if(!live){b.hidden=true;return}
+ if(ROLE!=="owner"&&!MYT.length){b.hidden=false;b.className="panel";b.innerHTML="<b>You are not in a team yet.</b><p class=\"hint\" style=\"margin:6px 0 0\">The owner needs to add you to a team. After that, reload this page.</p>";return}
+ var a=myTeamIds();
+ if(ROLE==="owner"&&!a.length){b.hidden=false;b.className="panel";b.innerHTML="<p class=\"hint\" style=\"margin:0\">No teams yet. Open the Team tab and create your first team. Existing tasks stay under “No team” until you move them.</p>";return}
+ var ch=[];
+ if(ROLE==="owner"||a.length>1)ch.push(["","All teams"]);
+ a.forEach(function(id){ch.push([id,teamName(id)])});
+ if(ROLE==="owner"&&S.tasks.some(function(t){return !t.team}))ch.push(["none","No team"]);
+ b.hidden=false;b.className="fchips";
+ b.innerHTML=ch.map(function(c){return'<button type="button" data-team="'+esc(c[0])+'" aria-pressed="'+(curTeam===c[0])+'">'+esc(c[1])+"</button>"}).join("");
+}
+$("teamBar").addEventListener("click",function(e){var b=e.target.closest("button[data-team]");if(b)setTeam(b.dataset.team)});
+function fillTeamSel(){
+ var L=$("tmL"),sel=$("tmSel"),a=myTeamIds();
+ if(!live||!a.length){L.hidden=true;return}
+ L.hidden=false;var d=defTeam();
+ sel.innerHTML=a.map(function(id){return'<option value="'+esc(id)+'"'+(id===d?" selected":"")+">"+esc(teamName(id))+"</option>"}).join("");
+}
+
+/* owner panels */
+function selOf(k){return RSEL[k]||(RSEL[k]={teams:[]})}
+function tchips(attr,k,sel){
+ if(!hasTeams())return'<p class="hint" style="margin:4px 0">Create a team first.</p>';
+ return'<div class="fchips" style="margin:6px 0">'+Object.keys(TM).map(function(id){var on=sel.indexOf(id)>=0;return'<button type="button" data-'+attr+'="'+esc(k)+'" data-tid="'+esc(id)+'" aria-pressed="'+on+'">'+(on?"✓ ":"")+esc(teamName(id))+"</button>"}).join("")+"</div>";
+}
+function roleOpts(sel){return["editor","commenter","viewer"].map(function(r){return'<option value="'+r+'"'+(r===sel?" selected":"")+">"+RL[r]+"</option>"}).join("")}
+function teamsPanel(){
+ if(ROLE!=="owner")return"";
+ var ids=myTeamIds();
+ return'<div class="panel"><h2>Teams</h2><p class="hint">Each team has its own board. A member only sees the teams you put them in.</p>'+(ids.length?ids.map(function(id){
+  var n=S.tasks.filter(function(t){return t.team===id&&t.ty==="task"}).length;
+  return'<div class="row l1" style="flex-wrap:wrap"><div class="name">'+esc(teamName(id))+'<div class="meta"><span>'+n+" task"+(n===1?"":"s")+'</span></div></div><button class="btn alt" data-tren="'+esc(id)+'">Rename</button><button class="btn alt" data-tdel="'+esc(id)+'" aria-label="Delete team '+esc(teamName(id))+'">Delete</button></div>';
+ }).join(""):'<div class="empty">No teams yet.</div>')+'<form id="tmf" style="grid-template-columns:1fr auto"><input id="tmn" maxlength="40" required placeholder="New team name" aria-label="New team name"><button class="btn" type="submit">Add team</button></form></div>';
+}
+function accPanel(){
+ if(ROLE!=="owner")return"";
+ var ks=Object.keys(ACC).sort();
+ return'<div class="panel"><h2>Manage access</h2><p class="hint">Only people on this list can open a board. Tap team names to put a person in a team, take them out, or keep them in several teams.</p>'
+ +(ks.length?ks.map(function(k){var a=ACC[k];return'<div class="row l1" style="flex-wrap:wrap"><div class="name">'+esc(a.name||k)+'<div class="meta"><span>'+esc(k)+'</span></div>'+tchips("at",k,a.teams||[])+'</div><select data-acc="'+esc(k)+'" aria-label="Role for '+esc(k)+'" style="width:auto">'+roleOpts(a.role)+'</select><button class="btn alt" data-accdel="'+esc(k)+'" aria-label="Remove '+esc(k)+'">Remove</button></div>'}).join(""):'<div class="empty">Nobody added yet.</div>')
+ +'<form id="accf" style="grid-template-columns:1fr 1fr;align-items:end"><input id="acce" type="email" required placeholder="name@gmail.com" aria-label="Email to add"><input id="accn" maxlength="40" placeholder="Name" aria-label="Name"><select id="accr" aria-label="Role" style="width:auto">'+roleOpts("editor")+'</select><div class="full">'+tchips("rt","__new",selOf("__new").teams)+'</div><button class="btn full" type="submit">Add person</button></form></div>';
+}
+function accSet(k,patch){
+ if(ROLE!=="owner"||!DB)return;
+ patch.email=k;patch.by=ME;patch.ts=Date.now();
+ DB.doc("access/"+k).set(patch,{merge:true}).catch(function(){alert("Could not save. Check that the new Firestore rules are published.")});
+}
+V.addEventListener("submit",function(e){
+ if(e.target.id==="accf"){
+  e.preventDefault();
+  var em=$("acce").value.trim().toLowerCase(),s=selOf("__new");
+  if(!/^[^@\s\/]+@[^@\s\/]+\.[^@\s\/]+$/.test(em)){alert("Enter a valid email address.");return}
+  if(hasTeams()&&!s.teams.length){alert("Pick at least one team for this person.");return}
+  accSet(em,{role:$("accr").value,name:$("accn").value.trim(),teams:s.teams.slice()});
+  delete RSEL.__new;$("acce").value="";$("accn").value="";render();return;
+ }
+ if(e.target.id==="tmf"){
+  e.preventDefault();if(ROLE!=="owner"||!DB)return;
+  var n=$("tmn").value.trim();if(!n)return;
+  DB.doc("teams/t"+Date.now().toString(36)).set({name:n,ts:Date.now()}).catch(function(){alert("Could not create the team. Check that the new Firestore rules are published.")});
+  $("tmn").value="";
+ }
+});
+V.addEventListener("change",function(e){var k=e.target.dataset&&e.target.dataset.acc;if(!k)return;accSet(k,{role:e.target.value});e.target.blur()});
+V.addEventListener("click",function(e){
+ var b=e.target.closest("button");if(!b||ROLE!=="owner"||!DB)return;
+ var d=b.dataset,k;
+ if(d.accdel){k=d.accdel;if(confirm("Remove "+k+"? They will lose access to every team."))DB.doc("access/"+k).delete().catch(function(){alert("Could not remove.")});return}
+ if(d.rt!==undefined){var s=selOf(d.rt),i=s.teams.indexOf(d.tid);if(i<0)s.teams.push(d.tid);else s.teams.splice(i,1);render();return}
+ if(d.at!==undefined){var cur=((ACC[d.at]||{}).teams||[]).slice(),j=cur.indexOf(d.tid);if(j<0)cur.push(d.tid);else cur.splice(j,1);accSet(d.at,{teams:cur});return}
+ if(d.tren){var nn=prompt("Rename team",teamName(d.tren));if(nn&&nn.trim())DB.doc("teams/"+d.tren).set({name:nn.trim()},{merge:true}).catch(function(){alert("Could not rename.")});return}
+ if(d.tdel){
+  if(!confirm("Delete team “"+teamName(d.tdel)+"”? Its tasks move to “No team”. Members lose access to it."))return;
+  S.tasks.forEach(function(t){if(t.team===d.tdel)t.team=""});
+  Object.keys(ACC).forEach(function(m){var tl=ACC[m].teams||[];if(tl.indexOf(d.tdel)>=0)accSet(m,{teams:tl.filter(function(x){return x!==d.tdel})})});
+  if(curTeam===d.tdel)setTeam("");
+  save();DB.doc("teams/"+d.tdel).delete().catch(function(){alert("Could not delete the team.")});
+ }
+});
+
 V.addEventListener("click",function(e){
  var b=e.target.closest("button[data-a]");if(!b)return;
  var t=find(b.dataset.id),a=b.dataset.a;if(!t)return;
@@ -546,7 +692,8 @@ $("f").addEventListener("submit",function(e){
  var v=$("ty").value,isT=v==="task",id=Date.now(),ts=$("ts").value,te=$("te").value;
  if(te&&!ts){toast("Set a start time first");return}
  if(ts&&te&&te<=ts){toast("End time must be after the start time");return}
- S.tasks.push({id:id,n:n,dl:isT?($("dl").value||""):"",p:+$("pr").value,ty:isT?"task":"daily",fq:v==="weekly"?"w":"d",by:ME,tg:Math.min(7,Math.max(1,+$("tg").value||3)),st:"todo",step:0,log:{}});
+ var tm=$("tmL").hidden?"":$("tmSel").value;if(live&&hasTeams()&&!tm){toast("Pick a team first");return}
+ S.tasks.push({id:id,n:n,dl:isT?($("dl").value||""):"",p:+$("pr").value,ty:isT?"task":"daily",fq:v==="weekly"?"w":"d",by:ME,byn:MEN,team:tm,tg:Math.min(7,Math.max(1,+$("tg").value||3)),st:"todo",step:0,log:{}});
  setX(id,{ed:isT?"":$("dl").value,od:isT?$("od").value:"",ts:ts,te:te,al:$("al").value});
  if(ts)askNotif();
  save();$("name").value="";$("dl").value="";$("od").value="";$("ts").value="";$("te").value="";$("al").value="0";tab=isT?"board":"today";$("addBox").hidden=true;render();
@@ -558,23 +705,6 @@ $("theme").addEventListener("click",function(){
 });
 $("date").textContent=new Date().toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"});
 $("st").onclick=function(){tab="team";render()};
-/* owner: manage who has access and in which role */
-function accPanel(){
- if(ROLE!=="owner")return"";
- var ks=Object.keys(ACC).sort();
- var opts=function(sel){return ["editor","commenter","viewer"].map(function(r){return '<option value="'+r+'"'+(r===sel?" selected":"")+">"+RL[r]+"</option>"}).join("")};
- return '<div class="panel"><h2>Manage access</h2><p class="hint">Only people on this list can open the board. Add a Google email and choose what that person can do.</p>'+(ks.length?ks.map(function(k){return '<div class="row l1"><div class="name">'+esc(k)+'</div><select data-acc="'+esc(k)+'" aria-label="Role for '+esc(k)+'" style="width:auto">'+opts(ACC[k].role)+'</select><button class="btn alt" data-accdel="'+esc(k)+'" aria-label="Remove '+esc(k)+'">Remove</button></div>'}).join(""):'<div class="empty">Nobody added yet.</div>')+'<form id="accf" style="grid-template-columns:1fr auto auto;align-items:end"><input id="acce" type="email" required placeholder="name@gmail.com" aria-label="Email to add"><select id="accr" aria-label="Role" style="width:auto">'+opts("editor")+'</select><button class="btn" type="submit">Add</button></form></div>';
-}
-function accSet(k,r){if(ROLE!=="owner"||!DB)return;DB.doc("access/"+k).set({email:k,role:r,by:ME,ts:Date.now()}).catch(function(){alert("Could not save. Check that the new Firestore rules are published.")})}
-V.addEventListener("submit",function(e){
- if(e.target.id!=="accf")return;e.preventDefault();
- var em=$("acce").value.trim().toLowerCase();
- if(!/^[^@\s\/]+@[^@\s\/]+\.[^@\s\/]+$/.test(em)){alert("Enter a valid email address.");return}
- accSet(em,$("accr").value);$("acce").value="";$("acce").blur();
-});
-V.addEventListener("change",function(e){var k=e.target.dataset&&e.target.dataset.acc;if(!k)return;accSet(k,e.target.value);e.target.blur()});
-V.addEventListener("click",function(e){var b=e.target.closest("button[data-accdel]");if(!b||ROLE!=="owner"||!DB)return;var k=b.dataset.accdel;if(confirm("Remove "+k+"? They will lose access."))DB.doc("access/"+k).delete().catch(function(){alert("Could not remove.")})});
-
 /* access requests: people ask for access, the owner approves or removes */
 function pend(){return Object.keys(REQ).filter(function(k){return !ACC[k]&&k!==EML}).sort(function(a,b){return (REQ[a].ts||0)-(REQ[b].ts||0)})}
 function reqUi(){
@@ -589,16 +719,20 @@ function reqUi(){
 function reqPanel(){
  if(ROLE!=="owner")return"";
  var ks=pend();if(!ks.length)return"";
- var opts=function(sel){return ["editor","commenter","viewer"].map(function(r){return '<option value="'+r+'"'+(r===sel?" selected":"")+">"+RL[r]+"</option>"}).join("")};
- return '<div class="panel" style="border-color:var(--acc)"><h2>🔔 Access requests ('+ks.length+')</h2><p class="hint">These people signed in and asked to be added. Pick a role and approve, or remove the request.</p>'+ks.map(function(k){var r=REQ[k];return '<div class="row l2" style="flex-wrap:wrap"><div class="name">'+esc(k)+(r.name?'<div class="meta"><span>'+esc(r.name)+'</span><span>'+new Date(r.ts||0).toLocaleDateString()+'</span></div>':'')+'</div><select data-reqsel="'+esc(k)+'" aria-label="Role for '+esc(k)+'" style="width:auto">'+opts("viewer")+'</select><button class="btn" data-reqok="'+esc(k)+'">Approve</button><button class="btn alt" data-reqno="'+esc(k)+'" aria-label="Remove request from '+esc(k)+'">Remove</button></div>'}).join("")+'</div>';
+ return'<div class="panel" style="border-color:var(--acc)"><h2>🔔 Access requests ('+ks.length+')</h2><p class="hint">These people signed in and asked to be added. Choose a role and one or more teams, then approve.</p>'+ks.map(function(k){
+  var r=REQ[k];
+  return'<div class="row l2" style="flex-wrap:wrap"><div class="name">'+esc(r.name||k)+'<div class="meta"><span>'+esc(k)+'</span><span>'+new Date(r.ts||0).toLocaleDateString()+'</span></div>'+tchips("rt",k,selOf(k).teams)+'</div><select data-reqsel="'+esc(k)+'" aria-label="Role for '+esc(k)+'" style="width:auto">'+roleOpts("viewer")+'</select><button class="btn" data-reqok="'+esc(k)+'">Approve</button><button class="btn alt" data-reqno="'+esc(k)+'" aria-label="Remove request from '+esc(k)+'">Remove</button></div>';
+ }).join("")+"</div>";
 }
 V.addEventListener("click",function(e){
  var ok=e.target.closest("button[data-reqok]"),no=e.target.closest("button[data-reqno]");
  if((!ok&&!no)||ROLE!=="owner"||!DB)return;
  if(no){var k0=no.dataset.reqno;if(confirm("Remove the request from "+k0+"?"))DB.doc("requests/"+k0).delete().catch(function(){alert("Could not remove the request.")});return}
- var k=ok.dataset.reqok,r="viewer";
+ var k=ok.dataset.reqok,r="viewer",s=selOf(k);
  document.querySelectorAll("select[data-reqsel]").forEach(function(x){if(x.dataset.reqsel===k)r=x.value});
- DB.doc("access/"+k).set({email:k,role:r,by:ME,ts:Date.now()}).then(function(){return DB.doc("requests/"+k).delete()}).catch(function(){alert("Could not approve. Check that the new Firestore rules are published.")});
+ if(hasTeams()&&!s.teams.length){alert("Pick at least one team before approving.");return}
+ DB.doc("access/"+k).set({email:k,name:(REQ[k]&&REQ[k].name)||"",role:r,teams:s.teams.slice(),by:ME,ts:Date.now()},{merge:true})
+  .then(function(){delete RSEL[k];return DB.doc("requests/"+k).delete()}).catch(function(){alert("Could not approve. Check that the new Firestore rules are published.")});
 });
 
 /* comments on cards */
@@ -616,7 +750,7 @@ CM.addEventListener("click",function(e){
 });
 CM.addEventListener("submit",function(e){
  e.preventDefault();var i=$("cmi"),x=i?i.value.trim():"";if(!x||!DB||!canC||!cmT)return;
- DB.doc("comments/"+Date.now()+"-"+ME.slice(0,6)).set({tid:cmT,by:ME,name:MEN,text:x,ts:Date.now()}).catch(function(){alert("Could not post the comment.")});i.value="";
+ DB.doc("comments/"+Date.now()+"-"+ME.slice(0,6)).set({tid:cmT,team:((find(cmT)||{}).team)||"",by:ME,name:MEN,text:x,ts:Date.now()}).catch(function(){alert("Could not post the comment.")});i.value="";
 });
 document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!CM.hidden){CM.hidden=true;render(true)}});
 
@@ -682,8 +816,7 @@ function beep(){
  }
  try{if(navigator.vibrate)navigator.vibrate([200,100,200])}catch(e){}
 }
-var ALARM_MS=8000;
-function ringStart(){audio();beep();clearInterval(alT);var t0=Date.now();alT=setInterval(function(){if(Date.now()-t0>=ALARM_MS-500){clearInterval(alT);alT=null;return}beep()},1000)}
+function ringStart(){audio();beep();clearInterval(alT);var n=0;alT=setInterval(function(){n++;if(n>60){clearInterval(alT);alT=null;return}beep()},1300)}
 function ringStop(){clearInterval(alT);alT=null}
 function askNotif(){audio();try{if(window.Notification&&Notification.permission==="default")Notification.requestPermission()}catch(e){}}
 function notify(list){
@@ -729,13 +862,13 @@ $("tstA").onclick=function(){audio();beep()};
 /* table view + JPG export */
 function leftTxt(dl){if(!dl)return"";var n=diff(dl);return n<0?"Overdue "+(-n)+"d":n===0?"Due today":n===1?"Due tomorrow":n+" days left"}
 function fdate(dl){return dl?new Date(dl+"T00:00:00").toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}):"No deadline"}
-function byName(t){return !live||!t.by?"":(t.by===ME?MEN:(NM[t.by]||"Student"))}
+function byName(t){return !live||!t.by?"":(t.byn||(t.by===ME?MEN:(NM[t.by]||"Student")))}
 var tsel={todo:true,doing:true,done:true,reg:false};
 function isReg(t){return t.ty==="daily"}
 function selLabel(){var a=COLS.filter(function(c){return tsel[c[0]]}).map(function(c){return c[1]});if(tsel.reg)a.push("Daily tasks");return a.join(" + ")}
 function regList(){return habs().filter(function(t){var e=X(t).ed;return t.fq!=="o"&&(!e||e>=today())}).sort(function(a,b){return a.n.localeCompare(b.n)})}
 function tblRows(){
- var r=S.tasks.filter(function(t){return t.ty==="task"&&tsel[t.st]}).sort(function(a,b){return (a.st==="done"?1:0)-(b.st==="done"?1:0)||sortT(a,b)});
+ var r=VT().filter(function(t){return t.ty==="task"&&tsel[t.st]}).sort(function(a,b){return (a.st==="done"?1:0)-(b.st==="done"?1:0)||sortT(a,b)});
  return tsel.reg?r.concat(regList()):r;
 }
 var SC={todo:"l2",doing:"l1",done:"l0"},SCOL={todo:"#d98a00",doing:"#3b5bff",done:"#2f9467"};
@@ -748,17 +881,17 @@ function dlInfo(t){
 function timeLine(t){var x=X(t);return x.ts?x.ts+(x.te?" – "+x.te:""):""}
 function vTable(){
  names(S.tasks.map(function(t){return t.by}));
- var rows=tblRows(),showBy=live;
+ var rows=tblRows(),showBy=live,showTeam=live&&curTeam===""&&Object.keys(TM).length>1;
  var chips='<div class="fchips" role="group" aria-label="Choose what to show and download">'+COLS.concat([["reg","Daily tasks"]]).map(function(c){
-  var n=c[0]==="reg"?regList().length:S.tasks.filter(function(t){return t.ty==="task"&&t.st===c[0]}).length;
+  var n=c[0]==="reg"?regList().length:VT().filter(function(t){return t.ty==="task"&&t.st===c[0]}).length;
   return '<button type="button" data-tf="'+c[0]+'" aria-pressed="'+!!tsel[c[0]]+'">'+(tsel[c[0]]?"✓ ":"")+c[1]+'<span class="cnt">'+n+"</span></button>";
  }).join("")+"</div>";
  var bar='<div class="tbar"><button class="btn" data-tbl="jpg" type="button">Download JPG</button>'+(navigator.share?'<button class="btn alt" data-tbl="share" type="button">Share</button>':"")+"</div>";
  var body=rows.length?rows.map(function(t,i){
   var L=lvl(t),si=stInfo(t),di=dlInfo(t),tl=timeLine(t);
-  return '<tr data-id="'+t.id+'"><td class="hm">'+(i+1)+'</td><td><span class="pri l'+L.i+'">'+LV[L.i]+'</span></td><td class="tn">'+esc(t.n)+(tl?'<div class="tsub">⏰ '+esc(tl)+"</div>":"")+'</td><td>'+esc(di[0])+(di[1]?'<div class="tsub">'+esc(di[1])+"</div>":"")+'</td><td><span class="stt '+si.cls+'">'+si.n+"</span></td>"+(showBy?'<td class="hm">'+esc(isReg(t)?"—":(byName(t)||"—"))+"</td>":"")+"</tr>";
- }).join(""):'<tr><td colspan="6" class="empty">Nothing selected, or nothing to show.</td></tr>';
- return '<p class="hint">Pick any mix of To do, In progress, Done and Daily tasks. The table and the JPG show exactly what is selected. Tap a row to change its status, time or alarm.</p>'+chips+bar+'<div class="tblwrap"><table class="tbl"><thead><tr><th class="hm">#</th><th>Priority</th><th>Task</th><th>Deadline</th><th>Status</th>'+(showBy?'<th class="hm">Added by</th>':"")+'</tr></thead><tbody>'+body+"</tbody></table></div>";
+  return '<tr data-id="'+t.id+'"><td class="hm">'+(i+1)+'</td><td><span class="pri l'+L.i+'">'+LV[L.i]+'</span></td><td class="tn">'+esc(t.n)+(tl?'<div class="tsub">⏰ '+esc(tl)+"</div>":"")+'</td><td>'+esc(di[0])+(di[1]?'<div class="tsub">'+esc(di[1])+"</div>":"")+'</td><td><span class="stt '+si.cls+'">'+si.n+"</span></td>"+(showBy?'<td class="hm">'+esc(isReg(t)?"—":(byName(t)||"—"))+"</td>":"")+(showTeam?'<td class="hm">'+esc(teamName(t.team))+"</td>":"")+"</tr>";
+ }).join(""):'<tr><td colspan="7" class="empty">Nothing selected, or nothing to show.</td></tr>';
+ return '<p class="hint">Pick any mix of To do, In progress, Done and Daily tasks. The table and the JPG show exactly what is selected. Tap a row to change its status, time or alarm.</p>'+chips+bar+'<div class="tblwrap"><table class="tbl"><thead><tr><th class="hm">#</th><th>Priority</th><th>Task</th><th>Deadline</th><th>Status</th>'+(showBy?'<th class="hm">Added by</th>':"")+(showTeam?'<th class="hm">Team</th>':"")+'</tr></thead><tbody>'+body+"</tbody></table></div>";
 }
 
 function wrapTxt(ctx,text,maxW,maxL){
@@ -774,9 +907,12 @@ function wrapTxt(ctx,text,maxW,maxL){
 }
 function rrect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
 function tblDraw(){
- var rows=tblRows(),showBy=live,W=1240,pad=40,rowH=68,headH=118,thH=48,footH=60,F='"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif';
- var cols=showBy?[["#",50],["Priority",130],["Task",380],["Deadline",230],["Status",150],["Added by",180]]:[["#",50],["Priority",130],["Task",560],["Deadline",260],["Status",150]];
- var tw=0;cols.forEach(function(c){tw+=c[1]});pad=Math.round((W-tw)/2);
+ var rows=tblRows(),showBy=live,showTeam=live&&curTeam===""&&Object.keys(TM).length>1,W=1240,pad=40,rowH=68,headH=118,thH=48,footH=60,F='"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif';
+ var cols=[["#",50],["Priority",130],["Task",0],["Deadline",230],["Status",150]],ti=-1;
+ if(showBy)cols.push(["Added by",170]);
+ if(showTeam){ti=cols.length;cols.push(["Team",150])}
+ var fx=0;cols.forEach(function(k){fx+=k[1]});cols[2][1]=(W-80)-fx;
+ var tw=0;cols.forEach(function(k){tw+=k[1]});pad=Math.round((W-tw)/2);
  var H=headH+thH+Math.max(1,rows.length)*rowH+footH;
  var sc=Math.min(2,16000/H),cv=document.createElement("canvas");cv.width=Math.round(W*sc);cv.height=Math.round(H*sc);
  var c=cv.getContext("2d");c.scale(sc,sc);c.textBaseline="alphabetic";
@@ -785,7 +921,7 @@ function tblDraw(){
  c.fillStyle="#14213d";c.font="800 36px "+F;c.fillText("Study Planner",pad,58);
  var done=rows.filter(function(t){return !isReg(t)&&t.st==="done"}).length;
  c.fillStyle="#667089";c.font="500 20px "+F;
- var sub=new Date().toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"})+" · "+rows.length+" item"+(rows.length===1?"":"s")+(tsel.done?" · "+done+" done":"")+" · "+selLabel();
+ var sub=new Date().toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"})+" · "+rows.length+" item"+(rows.length===1?"":"s")+(tsel.done?" · "+done+" done":"")+(live&&curTeam&&hasTeams()?" · "+(curTeam==="none"?"No team":teamName(curTeam)):"")+" · "+selLabel();
  c.fillText(wrapTxt(c,sub,W-2*pad,1)[0],pad,92);
  var y=headH;
  c.fillStyle="#eaeefc";rrect(c,pad,y,tw,thH,10);c.fill();
@@ -810,7 +946,8 @@ function tblDraw(){
   x+=cols[3][1];
   c.font="700 17px "+F;var sw=c.measureText(si.n).width+26;
   c.lineWidth=2;c.strokeStyle=si.col;rrect(c,x+8,cy-15,sw,30,15);c.stroke();c.fillStyle="#14213d";c.fillText(si.n,x+21,cy+6);x+=cols[4][1];
-  if(showBy){c.fillStyle="#14213d";c.font="500 18px "+F;var nmx=wrapTxt(c,isReg(t)?"—":(byName(t)||"—"),cols[5][1]-24,1);c.fillText(nmx[0],x+14,cy+6)}
+  if(showBy){c.fillStyle="#14213d";c.font="500 18px "+F;var nmx=wrapTxt(c,isReg(t)?"—":(byName(t)||"—"),cols[5][1]-24,1);c.fillText(nmx[0],x+14,cy+6);x+=cols[5][1]}
+  if(showTeam){c.fillStyle="#14213d";c.font="500 18px "+F;c.fillText(wrapTxt(c,teamName(t.team),cols[ti][1]-24,1)[0],x+14,cy+6)}
   y+=rowH;
  });
  c.fillStyle="#667089";c.font="500 15px "+F;c.fillText("Generated by Study Planner · "+new Date().toLocaleString(),pad,H-24);
@@ -842,12 +979,13 @@ function asDraw(){
  var t=find(asT);if(!t){AS.hidden=true;return}
  if(asMode==="time"){timeDraw(t);return}
  var rw=!ro();
- $("asb").innerHTML='<h2>'+esc(t.n)+'</h2>'+(rw?'<p class="hint">Move to</p><div class="stk">'+COLS.map(function(c){var cur=t.st===c[0];return '<button class="btn'+(cur?"":" alt")+'" data-st="'+c[0]+'"'+(cur?' aria-current="true"':"")+'>'+c[1]+(cur?" (current)":"")+'</button>'}).join("")+'</div>':'')+'<button class="btn alt" data-ac="tm" style="width:100%;margin-top:10px">⏰ Time &amp; alarm</button>'+(live?'<button class="btn alt" data-ac="cm" style="width:100%;margin-top:10px">💬 Comments ('+cmCount(t.id)+')</button>':'')+(rw?'<button class="btn alt" data-ac="del" style="width:100%;margin-top:10px;color:var(--l3)">Delete task</button>':'')+'<button class="btn alt" data-ac="x" style="width:100%;margin-top:10px">Close</button>';
+ $("asb").innerHTML='<h2>'+esc(t.n)+'</h2>'+(rw?'<p class="hint">Move to</p><div class="stk">'+COLS.map(function(c){var cur=t.st===c[0];return '<button class="btn'+(cur?"":" alt")+'" data-st="'+c[0]+'"'+(cur?' aria-current="true"':"")+'>'+c[1]+(cur?" (current)":"")+'</button>'}).join("")+'</div>':'')+(ROLE==="owner"&&live&&hasTeams()?'<p class="hint" style="margin-top:12px">Move to team</p><div class="stk">'+myTeamIds().concat([""]).map(function(id){var cur=(t.team||"")===id;return'<button class="btn'+(cur?"":" alt")+'" data-mt="'+esc(id)+'">'+esc(teamName(id))+(cur?" (current)":"")+"</button>"}).join("")+"</div>":"")+'<button class="btn alt" data-ac="tm" style="width:100%;margin-top:10px">⏰ Time &amp; alarm</button>'+(live?'<button class="btn alt" data-ac="cm" style="width:100%;margin-top:10px">💬 Comments ('+cmCount(t.id)+')</button>':'')+(rw?'<button class="btn alt" data-ac="del" style="width:100%;margin-top:10px;color:var(--l3)">Delete task</button>':'')+'<button class="btn alt" data-ac="x" style="width:100%;margin-top:10px">Close</button>';
 }
 AS.addEventListener("click",function(e){
  if(e.target===AS){AS.hidden=true;return}
  var b=e.target.closest("button");if(!b)return;var t=find(asT);if(!t)return;
  if(b.dataset.st){if(ro()){denied();return}AS.hidden=true;move(t,b.dataset.st);return}
+ if(b.dataset.mt!==undefined&&ROLE==="owner"){AS.hidden=true;t.team=b.dataset.mt;save();render();toast("Moved to "+teamName(t.team));return}
  var a=b.dataset.ac;
  if(a==="x")AS.hidden=true;
  else if(a==="tm"){asMode="time";asDraw()}
@@ -874,7 +1012,7 @@ V.addEventListener("touchend",function(e){
  var tk=find(id);if(!tk)return;
  var k=COLS.map(function(x){return x[0]}),n=k[k.indexOf(tk.st)+(dx>0?1:-1)];if(n)move(tk,n);
 });
-$("fab").onclick=function(){$("addBox").hidden=false;setTimeout(function(){$("name").focus()},50)};
+$("fab").onclick=function(){fillTeamSel();$("addBox").hidden=false;setTimeout(function(){$("name").focus()},50)};
 $("addX").onclick=function(){$("addBox").hidden=true};
 $("addBox").addEventListener("click",function(e){if(e.target===this)this.hidden=true});
 document.addEventListener("keydown",function(e){if(e.key==="Escape"){if(!AS.hidden)AS.hidden=true;if(!$("addBox").hidden)$("addBox").hidden=true}});
