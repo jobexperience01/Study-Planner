@@ -130,6 +130,24 @@ header .tag{min-height:36px;padding:0 12px!important;display:inline-flex;align-i
  .fab span{display:none}
  .toast{bottom:calc(150px + env(safe-area-inset-bottom,0px))}
 }
+
+/* ---- table view ---- */
+.seg{display:flex;gap:6px;background:var(--chip);padding:4px;border-radius:12px;margin:0 0 12px;max-width:280px}
+.seg button{flex:1;border:0;background:transparent;min-height:40px;border-radius:9px;font-weight:600;color:var(--mute)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.tbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
+.tbar select{width:auto;min-width:150px}
+.tblwrap{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow-x:auto;box-shadow:var(--sh)}
+.tbl{width:100%;border-collapse:collapse;font-size:.92rem}
+.tbl th{text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);padding:12px;border-bottom:1px solid var(--line);background:var(--chip);white-space:nowrap}
+.tbl td{padding:12px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl tbody tr{cursor:pointer}
+.tbl tbody tr:hover td{background:var(--chip)}
+.tbl tbody tr:last-child td{border-bottom:0}
+.tn{font-weight:600;overflow-wrap:anywhere}
+.tsub{font-size:.76rem;color:var(--mute)}
+.pri,.stt{display:inline-block;padding:2px 11px;border-radius:99px;font-size:.78rem;font-weight:700;white-space:nowrap;border:1.5px solid var(--c);color:var(--ink)}
+@media (max-width:760px){.hm{display:none}.tbl th,.tbl td{padding:10px 8px}.tbl{font-size:.88rem}}
 </style>
 </head>
 <body>
@@ -314,7 +332,11 @@ function card(t){
  if(t.st==="done"){rev=t.nextRev?(diff(t.nextRev)<=0?'<span class="late">Revise today</span>':"<span>Revise in "+diff(t.nextRev)+"d</span>"):"<span>Mastered ✓</span>"}
  return '<div class="card l'+L.i+'" draggable="'+rw+'" data-id="'+t.id+'"><div class="name">'+esc(t.n)+'</div><div class="meta"><span class="tag">'+LV[L.i]+"</span>"+(L.up?'<span class="tag up">↑ from '+L.from+"</span>":"")+(t.st==="done"?rev:left(t.dl))+(t.by&&t.by!==ME&&NM[t.by]?"<span>by "+esc(NM[t.by])+"</span>":"")+'</div><div class="acts">'+(rw?'<button class="btn'+(t.st==="done"?" alt":"")+'" data-a="'+(t.st==="done"?"to":"go")+'"'+(t.st==="done"?' data-st="todo"':"")+' data-id="'+t.id+'">'+(t.st==="todo"?"Start":t.st==="doing"?"Mark done ✓":"Reopen")+'</button>':"")+cmb+(rw?'<button data-a="more" data-id="'+t.id+'" aria-label="More actions">⋯</button>':"")+'</div></div>';
 }
-function vBoard(){names(S.tasks.map(function(t){return t.by}));
+function vBoard(){
+ var sg='<div class="seg" role="tablist" aria-label="Board view"><button data-bv="board" aria-pressed="'+(bview==="board")+'">Board</button><button data-bv="table" aria-pressed="'+(bview==="table")+'">Table</button></div>';
+ return sg+(bview==="table"?vTable():vBoardCols());
+}
+function vBoardCols(){names(S.tasks.map(function(t){return t.by}));
  var tk=S.tasks.filter(function(t){return t.ty==="task"});
  var chips='<div class="stages" role="tablist">'+COLS.map(function(c){return '<button data-stage="'+c[0]+'" aria-pressed="'+(bcol===c[0])+'">'+c[1]+'<span class="cnt">'+tk.filter(function(t){return t.st===c[0]}).length+"</span></button>"}).join("")+"</div>";
  return chips+'<p class="hint">Tap a card’s main button to move it forward. Swipe a card right or left, or tap ⋯ for more. On a computer you can also drag cards. Priority rises on its own as deadlines get close.</p><div class="board">'+COLS.map(function(c){
@@ -411,9 +433,9 @@ function vGraphs(){
  return '<p class="hint">Everything here is tappable and takes you to the place behind it.</p><div class="grid2"><div>'+donut+run+foc+'</div><div>'+ach+dly+wkp+"</div></div>";
 }
 V_go();
-function V_go(){document.getElementById("view").addEventListener("click",function(e){var g=e.target.closest("[data-go]");if(!g)return;var k=g.dataset.go;if(k==="check"){ckOpen(g.dataset.date);return}if(g.dataset.col)bcol=g.dataset.col;var tt=g.dataset.id?find(g.dataset.id):null;if(tt&&k==="board")bcol=tt.st;tab=k;render();flash(g.dataset.id,g.dataset.col)})}
+function V_go(){document.getElementById("view").addEventListener("click",function(e){var g=e.target.closest("[data-go]");if(!g)return;var k=g.dataset.go;if(k==="check"){ckOpen(g.dataset.date);return}if(k==="board")bview="board";if(g.dataset.col)bcol=g.dataset.col;var tt=g.dataset.id?find(g.dataset.id):null;if(tt&&k==="board")bcol=tt.st;tab=k;render();flash(g.dataset.id,g.dataset.col)})}
 /* shared plan: live sync through Firebase (via the adapter above) */
-var bcol="todo",RL={owner:"Owner",editor:"Editor",commenter:"Commenter",viewer:"Viewer"},ROLE="",EML="",MEN="Student",canC=false,ACC={},REQ={},CMT=[],cmT=null,ME="me",DB=null,USR=null,OWN=false,NM={},MEM={},LAST={},LASTM="",live=false,ready=false,canW=true,gotT=false,gotM=false,hyd=false,tsnap=null,ckAuto=false;
+var bview="board",tfil="all",bcol="todo",RL={owner:"Owner",editor:"Editor",commenter:"Commenter",viewer:"Viewer"},ROLE="",EML="",MEN="Student",canC=false,ACC={},REQ={},CMT=[],cmT=null,ME="me",DB=null,USR=null,OWN=false,NM={},MEM={},LAST={},LASTM="",live=false,ready=false,canW=true,gotT=false,gotM=false,hyd=false,tsnap=null,ckAuto=false;
 function shared(t){var o={};for(var k in t)if(k!=="log")o[k]=t[k];return o}
 function mine(){var lg={};S.tasks.forEach(function(t){if(t.ty==="daily"&&t.log&&Object.keys(t.log).length)lg[t.id]=t.log});return{logs:lg,act:S.act,focus:S.focus}}
 function fail(e){}
@@ -577,6 +599,97 @@ CM.addEventListener("submit",function(e){
 });
 document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!CM.hidden){CM.hidden=true;render(true)}});
 
+/* table view + JPG export */
+function leftTxt(dl){if(!dl)return"";var n=diff(dl);return n<0?"Overdue "+(-n)+"d":n===0?"Due today":n===1?"Due tomorrow":n+" days left"}
+function fdate(dl){return dl?new Date(dl+"T00:00:00").toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}):"No deadline"}
+function byName(t){return !live||!t.by?"":(t.by===ME?MEN:(NM[t.by]||"Student"))}
+function tblRows(){
+ return S.tasks.filter(function(t){return t.ty==="task"&&(tfil==="all"||t.st===tfil)}).sort(function(a,b){return (a.st==="done"?1:0)-(b.st==="done"?1:0)||sortT(a,b)});
+}
+var SC={todo:"l2",doing:"l1",done:"l0"};
+function stName(k){return COLS.filter(function(c){return c[0]===k})[0][1]}
+function vTable(){
+ names(S.tasks.map(function(t){return t.by}));
+ var rows=tblRows(),showBy=live;
+ var opts=[["all","All statuses"]].concat(COLS).map(function(c){return '<option value="'+c[0]+'"'+(tfil===c[0]?" selected":"")+">"+c[1]+"</option>"}).join("");
+ var bar='<div class="tbar"><select data-tfil aria-label="Filter by status">'+opts+'</select><button class="btn" data-tbl="jpg" type="button">Download JPG</button>'+(navigator.share?'<button class="btn alt" data-tbl="share" type="button">Share</button>':"")+"</div>";
+ var body=rows.length?rows.map(function(t,i){
+  var L=lvl(t),lt=leftTxt(t.dl);
+  return '<tr data-id="'+t.id+'"><td class="hm">'+(i+1)+'</td><td><span class="pri l'+L.i+'">'+LV[L.i]+'</span></td><td class="tn">'+esc(t.n)+'</td><td>'+esc(fdate(t.dl))+(lt&&t.st!=="done"?'<div class="tsub">'+esc(lt)+"</div>":"")+'</td><td><span class="stt '+SC[t.st]+'">'+stName(t.st)+'</span></td>'+(showBy?'<td class="hm">'+esc(byName(t)||"—")+"</td>":"")+"</tr>";
+ }).join(""):'<tr><td colspan="6" class="empty">No tasks to show.</td></tr>';
+ return '<p class="hint">All your tasks at a glance, most urgent first. Tap a row to move, comment on or delete it. Use Download JPG to save the table as a picture you can share.</p>'+bar+'<div class="tblwrap"><table class="tbl"><thead><tr><th class="hm">#</th><th>Priority</th><th>Task</th><th>Deadline</th><th>Status</th>'+(showBy?'<th class="hm">Added by</th>':"")+'</tr></thead><tbody>'+body+"</tbody></table></div>";
+}
+V.addEventListener("change",function(e){if(e.target.matches&&e.target.matches("select[data-tfil]")){tfil=e.target.value;render()}});
+function wrapTxt(ctx,text,maxW,maxL){
+ var out=[],cur="";
+ String(text).split(/\s+/).forEach(function(w){
+  while(ctx.measureText(w).width>maxW&&w.length>1){var k=w.length;while(k>1&&ctx.measureText(w.slice(0,k)).width>maxW)k--;if(cur){out.push(cur);cur=""}out.push(w.slice(0,k));w=w.slice(k)}
+  var t=cur?cur+" "+w:w;
+  if(ctx.measureText(t).width<=maxW)cur=t;else{out.push(cur);cur=w}
+ });
+ if(cur)out.push(cur);
+ if(out.length>maxL){out=out.slice(0,maxL);var l=out[maxL-1];while(l.length>1&&ctx.measureText(l+"…").width>maxW)l=l.slice(0,-1);out[maxL-1]=l+"…"}
+ return out;
+}
+function rrect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
+function tblDraw(){
+ var rows=tblRows(),showBy=live,W=1240,pad=40,rowH=68,headH=118,thH=48,footH=60,F='"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif';
+ var cols=showBy?[["#",50],["Priority",130],["Task",400],["Deadline",200],["Status",150],["Added by",190]]:[["#",50],["Priority",130],["Task",590],["Deadline",200],["Status",150]];
+ var tw=0;cols.forEach(function(c){tw+=c[1]});pad=Math.round((W-tw)/2);
+ var H=headH+thH+Math.max(1,rows.length)*rowH+footH;
+ var sc=Math.min(2,16000/H),cv=document.createElement("canvas");cv.width=Math.round(W*sc);cv.height=Math.round(H*sc);
+ var c=cv.getContext("2d");c.scale(sc,sc);c.textBaseline="alphabetic";
+ var LC=["#2f9467","#3b5bff","#d98a00","#e5484d"],SCOL={todo:"#d98a00",doing:"#3b5bff",done:"#2f9467"};
+ c.fillStyle="#ffffff";c.fillRect(0,0,W,H);
+ c.fillStyle="#14213d";c.font="800 36px "+F;c.fillText("Study Planner",pad,58);
+ var done=rows.filter(function(t){return t.st==="done"}).length;
+ c.fillStyle="#667089";c.font="500 20px "+F;
+ c.fillText("Task list · "+new Date().toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long",year:"numeric"})+" · "+rows.length+" task"+(rows.length===1?"":"s")+" · "+done+" done"+(tfil==="all"?"":" · "+stName(tfil)),pad,92);
+ var y=headH;
+ c.fillStyle="#eaeefc";rrect(c,pad,y,tw,thH,10);c.fill();
+ c.fillStyle="#667089";c.font="700 15px "+F;
+ var x=pad;cols.forEach(function(k){c.fillText(k[0].toUpperCase(),x+14,y+30);x+=k[1]});
+ y+=thH;
+ if(!rows.length){c.fillStyle="#667089";c.font="500 20px "+F;c.fillText("No tasks to show.",pad+14,y+42)}
+ rows.forEach(function(t,i){
+  if(i%2===1){c.fillStyle="#f6f8fd";c.fillRect(pad,y,tw,rowH)}
+  c.fillStyle="#e1e5ef";c.fillRect(pad,y+rowH-1,tw,1);
+  var L=lvl(t),x=pad,cy=y+rowH/2;
+  c.fillStyle="#667089";c.font="600 18px "+F;c.fillText(String(i+1),x+14,cy+6);x+=cols[0][1];
+  var pt=LV[L.i];c.font="700 17px "+F;var pw=c.measureText(pt).width+26;
+  c.lineWidth=2;c.strokeStyle=LC[L.i];rrect(c,x+8,cy-15,pw,30,15);c.stroke();c.fillStyle="#14213d";c.fillText(pt,x+21,cy+6);x+=cols[1][1];
+  c.fillStyle="#14213d";c.font="700 20px "+F;
+  var ln=wrapTxt(c,t.n,cols[2][1]-24,2);
+  if(ln.length===1)c.fillText(ln[0],x+14,cy+7);else{c.fillText(ln[0],x+14,cy-4);c.fillText(ln[1],x+14,cy+22)}
+  x+=cols[2][1];
+  var lt=t.st!=="done"?leftTxt(t.dl):"";
+  c.fillStyle="#14213d";c.font="600 18px "+F;c.fillText(fdate(t.dl),x+14,lt?cy-3:cy+6);
+  if(lt){c.font="500 15px "+F;c.fillStyle=(t.dl&&diff(t.dl)<=1)?"#e5484d":"#667089";c.fillText(lt,x+14,cy+18)}
+  x+=cols[3][1];
+  var st=stName(t.st);c.font="700 17px "+F;var sw=c.measureText(st).width+26;
+  c.lineWidth=2;c.strokeStyle=SCOL[t.st];rrect(c,x+8,cy-15,sw,30,15);c.stroke();c.fillStyle="#14213d";c.fillText(st,x+21,cy+6);x+=cols[4][1];
+  if(showBy){c.fillStyle="#14213d";c.font="500 18px "+F;var nmx=wrapTxt(c,byName(t)||"—",cols[5][1]-24,1);c.fillText(nmx[0],x+14,cy+6)}
+  y+=rowH;
+ });
+ c.fillStyle="#667089";c.font="500 15px "+F;c.fillText("Generated by Study Planner · "+new Date().toLocaleString(),pad,H-24);
+ return cv;
+}
+function tblExport(share){
+ var go=function(){
+  var cv;try{cv=tblDraw()}catch(e){toast("Could not create the image.");return}
+  cv.toBlob(function(b){
+   if(!b){toast("Could not create the image.");return}
+   var name="study-planner-table-"+today()+".jpg";
+   try{
+    if(share&&navigator.canShare){var f=new File([b],name,{type:"image/jpeg"});if(navigator.canShare({files:[f]})){navigator.share({files:[f],title:"Study Planner"}).catch(function(){});return}}
+   }catch(e){}
+   var a=document.createElement("a"),u=URL.createObjectURL(b);a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},1500);
+   toast("Table saved as JPG");
+  },"image/jpeg",0.92);
+ };
+ try{(document.fonts&&document.fonts.load?document.fonts.load('700 20px "Bricolage Grotesque"'):Promise.resolve()).then(go,go)}catch(e){go()}
+}
+
 /* modern interactions: action sheet, swipe, toast, stage chips */
 var toastT=null;
 function toast(m){var e=$("toast");if(!e){e=document.createElement("div");e.id="toast";e.className="toast";e.setAttribute("role","status");document.body.appendChild(e)}e.textContent=m;e.hidden=false;clearTimeout(toastT);toastT=setTimeout(function(){e.hidden=true},2200)}
@@ -599,6 +712,9 @@ AS.addEventListener("click",function(e){
 });
 var swiped=false,sw=null;
 V.addEventListener("click",function(e){
+ var bv=e.target.closest("button[data-bv]");if(bv){bview=bv.dataset.bv;render();return}
+ var tb=e.target.closest("button[data-tbl]");if(tb){tblExport(tb.dataset.tbl==="share");return}
+ var tr=e.target.closest("tr[data-id]");if(tr&&!e.target.closest("button")){asOpen(+tr.dataset.id);return}
  var st=e.target.closest("button[data-stage]");if(st){bcol=st.dataset.stage;render();return}
  var c=e.target.closest(".card");if(!c||e.target.closest("button")||swiped)return;asOpen(+c.dataset.id);
 });
