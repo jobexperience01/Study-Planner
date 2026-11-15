@@ -612,7 +612,7 @@ function syncMyTeams(){
  if(!MYT.length){tsnap={docs:[],empty:true};gotT=true;sync()}else tmerge();
  cmerge();teamsChanged();
 }
-function ownsTeam(id){return ROLE==="owner"||(!!TM[id]&&TM[id].owner===EML)}
+function ownsTeam(id){return ROLE==="owner"||(ISCO&&MYT.indexOf(id)>=0)}
 function teamsChanged(){fixCur();myTeamIds().forEach(watchProg);status();render(true)}
 function tmerge(){
  if(!MYT.every(function(i){return TSn[i]}))return;
