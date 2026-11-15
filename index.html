@@ -256,11 +256,11 @@ var ctx=Promise.all([authed,roleP]).then(function(r){
 function requestUi(u){
   var em=(u.email||"").toLowerCase(),n=document.getElementById("noacc");
   function mk(t,cls,fn){var b=document.createElement("button");b.className="btn "+cls;b.type="button";b.style.marginRight="8px";b.textContent=t;b.onclick=fn;return b}
-  function draw(sent){
+  function draw(sent,toName){
     n.textContent="";
     var p=document.createElement("p");p.className="hint";p.style.cssText="color:var(--ink);font-weight:600;margin:0 0 10px";
     p.textContent=sent
-      ?"Signed in as "+u.email+". Your access request is waiting for the admin. Once approved, reload this page. Until then you are using your own private copy on this device."
+      ?"Signed in as "+u.email+". Your access request is waiting for "+(toName||"the admin")+". Once approved, reload this page. Until then you are using your own private copy on this device."
       :"Signed in as "+u.email+", but this email is not on the access list. You can ask the admin for access. Until then you are using your own private copy on this device.";
     n.appendChild(p);
     if(sent){
@@ -270,17 +270,36 @@ function requestUi(u){
       }));
     }else{
       var inp=document.createElement("input");inp.maxLength=40;inp.placeholder="Your name (shown on tasks you add)";inp.value=u.displayName||"";inp.setAttribute("aria-label","Your name");inp.style.cssText="margin:0 0 10px";n.appendChild(inp);
-      n.appendChild(mk("Request access","",function(){
+      var vl=[],ae=document.createElement("input");ae.type="email";ae.placeholder="Admin or Co-Admin email (the person who should approve you)";ae.setAttribute("aria-label","Approver email");ae.style.cssText="margin:0 0 8px";n.appendChild(ae);
+      var msg=document.createElement("p");msg.className="hint";msg.style.margin="0 0 8px";n.appendChild(msg);
+      var sel=document.createElement("select");sel.setAttribute("aria-label","Choose who approves");sel.style.cssText="margin:0 0 10px;width:100%";sel.hidden=true;n.appendChild(sel);
+      function fill(){sel.innerHTML="";vl.forEach(function(v){var o=document.createElement("option");o.value=v.email;o.textContent=v.name+" ("+v.email+") · "+v.role;sel.appendChild(o)});sel.hidden=!vl.length}
+      n.appendChild(mk("Verify email","alt",function(){
+        var a=(ae.value||"").trim().toLowerCase();
+        if(!/^[^@\s\/]+@[^@\s\/]+\.[^@\s\/]+$/.test(a)){msg.textContent="Enter a valid email address.";return}
+        if(a===em){msg.textContent="Enter the email of an Admin or Co-Admin, not your own.";return}
+        if(vl.some(function(v){return v.email===a})){msg.textContent="Already added below.";return}
+        function ok(nm,rl){vl.push({email:a,name:nm,role:rl});fill();sel.value=a;ae.value="";msg.textContent="✓ Found "+nm+". Choose them below to send your request."}
+        if(a===OWNER_EMAIL){ok("Main Admin","Admin");return}
+        msg.textContent="Checking…";
+        fs.doc("access/"+a).get().then(function(d){
+          var x=d.exists?d.data():null;
+          if(x&&x.role==="coowner")ok(x.name||a,"Co-Admin");else msg.textContent="No Admin or Co-Admin has this email on the list. Check the address and try again.";
+        }).catch(function(){msg.textContent="No Admin or Co-Admin has this email on the list. Check the address and try again."});
+      }));
+      n.appendChild(mk("Send request","",function(){
         var nmv=(inp.value||"").trim();if(!nmv){alert("Please enter your name first.");return}
-        fs.doc("requests/"+em).set({email:em,name:nmv,uid:u.uid,status:"pending",ts:Date.now()})
-          .then(function(){draw(true)})
+        var to=sel.value,tv=vl.filter(function(v){return v.email===to})[0];
+        if(!tv){alert("Enter the email of the Admin or Co-Admin who should approve you, tap Verify email, then choose their name.");return}
+        fs.doc("requests/"+em).set({email:em,name:nmv,uid:u.uid,status:"pending",ts:Date.now(),to:tv.email,toName:tv.name})
+          .then(function(){draw(true,tv.name)})
           .catch(function(){alert("Could not send the request. Ask the admin to publish the latest Firestore rules.")});
       }));
     }
     n.hidden=false;
   }
   draw(false);
-  fs.doc("requests/"+em).get().then(function(s){if(s.exists)draw(true)}).catch(function(){});
+  fs.doc("requests/"+em).get().then(function(s){if(s.exists)draw(true,(s.data()||{}).toName)}).catch(function(){});
 }
 ctx.then(function(c){
   var u=c.u,b=document.getElementById("auth");
@@ -539,7 +558,7 @@ function start(){
     if(!MYT.length){tsnap={docs:[],empty:true};gotT=true;sync()}
     if(ISCO){
      db.collection("access").onSnapshot(function(s){ACC={};s.docs.forEach(function(d){ACC[d.id]=d.data()});syncMyTeams();reqUi();render(true)},function(){});
-     db.collection("requests").onSnapshot(function(s){REQ={};s.docs.forEach(function(d){REQ[d.id]=d.data()});reqUi();render(true)},function(){});
+     db.collection("requests").where("to","==",EML).onSnapshot(function(s){REQ={};s.docs.forEach(function(d){REQ[d.id]=d.data()});reqUi();render(true)},function(){});
     }
     MYT.forEach(attachTeam);
     teamsChanged();
@@ -815,7 +834,7 @@ function reqPanel(){
  var ks=pend();if(!ks.length)return"";
  return'<div class="panel" style="border-color:var(--acc)"><h2>🔔 Access requests ('+ks.length+')</h2><p class="hint">These people signed in and asked to be added. Choose a role and one or more teams, then approve.</p>'+ks.map(function(k){
   var r=REQ[k];
-  return'<div class="row l2" style="flex-wrap:wrap"><div class="name">'+esc(r.name||k)+'<div class="meta"><span>'+esc(k)+'</span><span>'+new Date(r.ts||0).toLocaleDateString()+'</span></div>'+tchips("rt",k,selOf(k).teams)+'</div><select data-reqsel="'+esc(k)+'" aria-label="Role for '+esc(k)+'" style="width:auto">'+roleOpts("viewer",ROLE!=="owner")+'</select><button class="btn" data-reqok="'+esc(k)+'">Approve</button><button class="btn alt" data-reqno="'+esc(k)+'" aria-label="Remove request from '+esc(k)+'">Remove</button></div>';
+  return'<div class="row l2" style="flex-wrap:wrap"><div class="name">'+esc(r.name||k)+'<div class="meta"><span>'+esc(k)+'</span><span>'+new Date(r.ts||0).toLocaleDateString()+'</span>'+(r.toName?'<span>To: '+esc(r.toName)+'</span>':'')+'</div>'+tchips("rt",k,selOf(k).teams)+'</div><select data-reqsel="'+esc(k)+'" aria-label="Role for '+esc(k)+'" style="width:auto">'+roleOpts("viewer",ROLE!=="owner")+'</select><button class="btn" data-reqok="'+esc(k)+'">Approve</button><button class="btn alt" data-reqno="'+esc(k)+'" aria-label="Remove request from '+esc(k)+'">Remove</button></div>';
  }).join("")+"</div>";
 }
 V.addEventListener("click",function(e){
