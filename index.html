@@ -649,6 +649,17 @@ function tchips(attr,k,sel){
  return'<div class="fchips" style="margin:6px 0">'+Object.keys(TM).map(function(id){var on=sel.indexOf(id)>=0;return'<button type="button" data-'+attr+'="'+esc(k)+'" data-tid="'+esc(id)+'" aria-pressed="'+on+'">'+(on?"✓ ":"")+esc(teamName(id))+"</button>"}).join("")+"</div>";
 }
 function roleOpts(sel,noCo){return(noCo?["editor","commenter","viewer"]:["editor","commenter","viewer","coowner"]).map(function(r){return'<option value="'+r+'"'+(r===sel?" selected":"")+">"+RL[r]+"</option>"}).join("")}
+function nmOf(k){return k===OWNER_EMAIL?"Main Admin":((ACC[k]&&ACC[k].name)||k)}
+function teamBy(id){var t=TM[id]||{},c=t.creator||t.owner;return"Created by "+(!c||c===OWNER_EMAIL?"Main Admin":(t.creatorName||nmOf(c)))}
+function teamLeads(id){
+ var ks=Object.keys(ACC).sort().filter(function(k){return ACC[k].role==="coowner"&&(ACC[k].teams||[]).indexOf(id)>=0});
+ return'<div class="hint" style="flex:1 1 100%;margin:2px 0">👑 Co-Admins: '+(ks.length?ks.map(function(k){return esc(nmOf(k))}).join(", "):"<b>none</b>"+(ROLE==="owner"?" · assign one below so this team stays managed":""))+"</div>";
+}
+function tmAssign(id){
+ var ks=Object.keys(ACC).sort().filter(function(k){return !(ACC[k].role==="coowner"&&(ACC[k].teams||[]).indexOf(id)>=0)});
+ if(!ks.length)return"";
+ return'<div style="flex:1 1 100%;margin-top:8px"><b>Assign a Co-Admin to '+esc(teamName(id))+'</b><div class="srow" style="gap:8px;margin-top:6px"><select aria-label="Choose person" style="flex:1">'+ks.map(function(k){return'<option value="'+esc(k)+'">'+esc(nmOf(k))+" ("+esc(k)+") · "+esc(RL[ACC[k].role]||ACC[k].role)+"</option>"}).join("")+'</select><button class="btn" data-tasg="'+esc(id)+'">Make Co-Admin</button></div></div>';
+}
 function tmMembers(id){
  var ks=Object.keys(ACC).sort().filter(function(k){return k!==EML&&(ACC[k].teams||[]).indexOf(id)>=0});
  return'<div style="flex:1 1 100%;margin-top:8px"><b>Members of '+esc(teamName(id))+' ('+ks.length+')</b>'
@@ -660,7 +671,7 @@ function teamsPanel(){
  var ids=myTeamIds();
  return'<div class="panel"><h2>Teams</h2><p class="hint">'+(ROLE==="owner"?"Each team has its own board. A member only sees the teams you put them in.":"Create your own teams and add people to them. Other Co-Admins cannot see your teams unless you add them as a member.")+'</p>'+(ids.length?ids.map(function(id){
   var n=S.tasks.filter(function(t){return t.team===id&&t.ty==="task"}).length;
-  return'<div class="row l1" style="flex-wrap:wrap"><div class="name">'+esc(teamName(id))+'<div class="meta"><span>'+n+" task"+(n===1?"":"s")+'</span></div></div>'+(ownsTeam(id)?'<button class="btn alt" data-tren="'+esc(id)+'">Rename</button>':'')+(ROLE==="owner"?'<button class="btn alt" data-tdel="'+esc(id)+'" aria-label="Delete team '+esc(teamName(id))+'">Delete</button>':'')+(ROLE!=="owner"?tmMembers(id):'')+'</div>';
+  return'<div class="row l1" style="flex-wrap:wrap"><div class="name">'+esc(teamName(id))+'<div class="meta"><span>'+n+" task"+(n===1?"":"s")+'</span><span>'+esc(teamBy(id))+'</span></div>'+teamLeads(id)+'</div>'+(ownsTeam(id)?'<button class="btn alt" data-tren="'+esc(id)+'">Rename</button>':'')+(ROLE==="owner"?'<button class="btn alt" data-tdel="'+esc(id)+'" aria-label="Delete team '+esc(teamName(id))+'">Delete</button>':'')+(ROLE!=="owner"?tmMembers(id):tmAssign(id))+'</div>';
  }).join(""):'<div class="empty">No teams yet.</div>')+'<form id="tmf" style="grid-template-columns:1fr auto"><input id="tmn" maxlength="40" required placeholder="New team name" aria-label="New team name"><button class="btn" type="submit">Add team</button></form></div>';
 }
 function accPanel(){
@@ -707,8 +718,9 @@ V.addEventListener("submit",function(e){
   e.preventDefault();if(!adm()||!DB)return;
   var n=$("tmn").value.trim();if(!n)return;
   var nid="t"+Date.now().toString(36),bad=function(){alert("Could not create the team. Check that the new Firestore rules are published.")};
-  if(ROLE==="owner")DB.doc("teams/"+nid).set({name:n,ts:Date.now(),owner:EML}).catch(bad);
-  else DB.doc("teams/"+nid).set({name:n,ts:Date.now(),owner:EML}).then(function(){
+  var tdoc={name:n,ts:Date.now(),owner:EML,creator:EML,creatorName:MEN};
+  if(ROLE==="owner")DB.doc("teams/"+nid).set(tdoc).catch(bad);
+  else DB.doc("teams/"+nid).set(tdoc).then(function(){
    return DB.doc("access/"+EML).set({teams:((ACC[EML]&&ACC[EML].teams)||MYT).concat([nid])},{merge:true});
   }).catch(bad);
   $("tmn").value="";
@@ -727,6 +739,15 @@ V.addEventListener("click",function(e){
  if(d.rt!==undefined){var s=selOf(d.rt),i=s.teams.indexOf(d.tid);if(i<0)s.teams.push(d.tid);else s.teams.splice(i,1);render();return}
  if(d.at!==undefined){var cur=((ACC[d.at]||{}).teams||[]).slice(),j=cur.indexOf(d.tid);if(j<0)cur.push(d.tid);else cur.splice(j,1);if(ROLE!=="owner"&&!cur.length&&(ACC[d.at]||{}).role!=="coowner"){alert("Use Remove to take this person out of all your teams.");return}accSet(d.at,{teams:cur});return}
  if(ROLE!=="owner")return;
+ if(d.tasg){
+  var sel=b.parentElement.querySelector("select"),em=sel&&sel.value;if(!em)return;
+  var tl=((ACC[em]||{}).teams||[]).slice();if(tl.indexOf(d.tasg)<0)tl.push(d.tasg);
+  if(!confirm("Make "+nmOf(em)+" a Co-Admin of “"+teamName(d.tasg)+"”? If they are in other teams they become Co-Admin there too."))return;
+  accSet(em,{role:"coowner",teams:tl});
+  var o=(TM[d.tasg]||{}).owner,keep=o&&o!==OWNER_EMAIL&&ACC[o]&&ACC[o].role==="coowner"&&(ACC[o].teams||[]).indexOf(d.tasg)>=0;
+  if(!keep)DB.doc("teams/"+d.tasg).set({owner:em},{merge:true}).catch(fail);
+  return;
+ }
  if(d.tren){var nn=prompt("Rename team",teamName(d.tren));if(nn&&nn.trim())DB.doc("teams/"+d.tren).set({name:nn.trim()},{merge:true}).catch(function(){alert("Could not rename.")});return}
  if(d.tdel){
   if(!confirm("Delete team “"+teamName(d.tdel)+"”? Its tasks move to “No team”. Members lose access to it."))return;
