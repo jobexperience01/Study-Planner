@@ -649,12 +649,18 @@ function tchips(attr,k,sel){
  return'<div class="fchips" style="margin:6px 0">'+Object.keys(TM).map(function(id){var on=sel.indexOf(id)>=0;return'<button type="button" data-'+attr+'="'+esc(k)+'" data-tid="'+esc(id)+'" aria-pressed="'+on+'">'+(on?"✓ ":"")+esc(teamName(id))+"</button>"}).join("")+"</div>";
 }
 function roleOpts(sel,noCo){return(noCo?["editor","commenter","viewer"]:["editor","commenter","viewer","coowner"]).map(function(r){return'<option value="'+r+'"'+(r===sel?" selected":"")+">"+RL[r]+"</option>"}).join("")}
+function tmMembers(id){
+ var ks=Object.keys(ACC).sort().filter(function(k){return k!==EML&&(ACC[k].teams||[]).indexOf(id)>=0});
+ return'<div style="flex:1 1 100%;margin-top:8px"><b>Members of '+esc(teamName(id))+' ('+ks.length+')</b>'
+  +(ks.length?ks.map(function(k){var a=ACC[k];return'<div class="srow" style="margin:6px 0"><span>'+esc(a.name||k)+'<span class="meta"> · '+esc(k)+' · '+esc(RL[a.role]||a.role)+'</span></span><button class="btn alt" data-tmrm="'+esc(id)+'" data-tmem="'+esc(k)+'" aria-label="Remove '+esc(k)+' from '+esc(teamName(id))+'">Remove</button></div>'}).join(""):'<div class="empty">No members yet.</div>')
+  +'<form class="tmadd" data-tid="'+esc(id)+'" style="grid-template-columns:1fr 1fr;align-items:end;margin-top:8px"><input type="email" required placeholder="member@gmail.com" aria-label="Member email"><input maxlength="40" placeholder="Name" aria-label="Member name"><select aria-label="Role" style="width:auto">'+roleOpts("editor",true)+'</select><button class="btn" type="submit">Add member</button></form></div>';
+}
 function teamsPanel(){
  if(!adm())return"";
  var ids=myTeamIds();
  return'<div class="panel"><h2>Teams</h2><p class="hint">'+(ROLE==="owner"?"Each team has its own board. A member only sees the teams you put them in.":"Create your own teams and add people to them. Other Co-Admins cannot see your teams unless you add them as a member.")+'</p>'+(ids.length?ids.map(function(id){
   var n=S.tasks.filter(function(t){return t.team===id&&t.ty==="task"}).length;
-  return'<div class="row l1" style="flex-wrap:wrap"><div class="name">'+esc(teamName(id))+'<div class="meta"><span>'+n+" task"+(n===1?"":"s")+'</span></div></div>'+(ownsTeam(id)?'<button class="btn alt" data-tren="'+esc(id)+'">Rename</button>':'')+(ROLE==="owner"?'<button class="btn alt" data-tdel="'+esc(id)+'" aria-label="Delete team '+esc(teamName(id))+'">Delete</button>':'')+'</div>';
+  return'<div class="row l1" style="flex-wrap:wrap"><div class="name">'+esc(teamName(id))+'<div class="meta"><span>'+n+" task"+(n===1?"":"s")+'</span></div></div>'+(ownsTeam(id)?'<button class="btn alt" data-tren="'+esc(id)+'">Rename</button>':'')+(ROLE==="owner"?'<button class="btn alt" data-tdel="'+esc(id)+'" aria-label="Delete team '+esc(teamName(id))+'">Delete</button>':'')+(ROLE!=="owner"?tmMembers(id):'')+'</div>';
  }).join(""):'<div class="empty">No teams yet.</div>')+'<form id="tmf" style="grid-template-columns:1fr auto"><input id="tmn" maxlength="40" required placeholder="New team name" aria-label="New team name"><button class="btn" type="submit">Add team</button></form></div>';
 }
 function accPanel(){
@@ -679,6 +685,14 @@ function accSet(k,patch){
  DB.doc("access/"+k).set(patch,{merge:true}).catch(function(){alert("Could not save. Check that the new Firestore rules are published.")});
 }
 V.addEventListener("submit",function(e){
+ if(e.target.classList&&e.target.classList.contains("tmadd")){
+  e.preventDefault();if(!adm()||!DB)return;
+  var f=e.target,tid=f.dataset.tid,i=f.querySelectorAll("input"),em2=i[0].value.trim().toLowerCase();
+  if(!/^[^@\s\/]+@[^@\s\/]+\.[^@\s\/]+$/.test(em2)){alert("Enter a valid email address.");return}
+  if(ACC[em2]){var ex2=(ACC[em2].teams||[]).slice();if(ex2.indexOf(tid)<0)ex2.push(tid);accSet(em2,{teams:ex2})}
+  else accSet(em2,{role:f.querySelector("select").value,name:i[1].value.trim(),teams:[tid]});
+  f.reset();return;
+ }
  if(e.target.id==="accf"){
   e.preventDefault();
   var em=$("acce").value.trim().toLowerCase(),s=selOf("__new");
@@ -705,6 +719,7 @@ V.addEventListener("change",function(e){var k=e.target.dataset&&e.target.dataset
  accSet(k,{role:e.target.value});e.target.blur()});
 V.addEventListener("click",function(e){
  var b=e.target.closest("button");if(!b||!adm()||!DB)return;
+ if(b.dataset.tmrm){var rk=b.dataset.tmem,ra=ACC[rk]||{},rl=(ra.teams||[]).filter(function(x){return x!==b.dataset.tmrm});if(!confirm("Remove "+rk+" from "+teamName(b.dataset.tmrm)+"?"))return;if(rl.length||ra.role==="coowner")accSet(rk,{teams:rl});else DB.doc("access/"+rk).delete().catch(function(){alert("Could not remove.")});return}
  if(b.dataset.tren&&ROLE!=="owner"&&ownsTeam(b.dataset.tren)){var n2=prompt("Rename team",teamName(b.dataset.tren));if(n2&&n2.trim())DB.doc("teams/"+b.dataset.tren).set({name:n2.trim()},{merge:true}).catch(function(){alert("Could not rename.")});return}
  var d=b.dataset,k;
  if(d.accdel){k=d.accdel;if(ROLE!=="owner"){var ak=ACC[k]||{},left=(ak.teams||[]).filter(function(x){return MYT.indexOf(x)<0});if(!confirm("Remove "+k+" from your teams?"))return;if(left.length||ak.role==="coowner")accSet(k,{teams:left});else DB.doc("access/"+k).delete().catch(function(){alert("Could not remove.")});return}
